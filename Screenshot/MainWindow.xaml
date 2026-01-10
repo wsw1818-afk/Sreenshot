@@ -1,0 +1,249 @@
+<Window x:Class="Screenshot.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
+        mc:Ignorable="d"
+        Title="Smart Capture"
+        Height="500" Width="700"
+        MinHeight="400" MinWidth="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#1e1e1e"
+        Closing="Window_Closing"
+        StateChanged="Window_StateChanged">
+
+    <Window.Resources>
+        <!-- 기본 버튼 스타일 -->
+        <Style x:Key="CaptureButton" TargetType="Button">
+            <Setter Property="Background" Value="#0078d4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="20,15"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1084d8"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#006cc1"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 보조 버튼 스타일 -->
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="Background" Value="#333333"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#444444"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#555555"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 헤더 -->
+        <Border Grid.Row="0" Background="#252525" Padding="20,15">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Smart Capture" FontSize="24" FontWeight="SemiBold" Foreground="White"/>
+                    <TextBlock x:Name="StatusText" Text="준비됨" FontSize="12" Foreground="#888888" Margin="0,5,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="설정" Style="{StaticResource SecondaryButton}"
+                            Click="SettingsButton_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 캡처 버튼 영역 -->
+        <Border Grid.Row="1" Background="#2a2a2a" Padding="20">
+            <StackPanel>
+                <!-- 메인 캡처 버튼들 -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0" Style="{StaticResource CaptureButton}"
+                            Click="CaptureFullScreen_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="🖥️" FontSize="28" HorizontalAlignment="Center"/>
+                            <TextBlock Text="전체 화면" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+                            <TextBlock Text="PrtSc" FontSize="10" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Grid.Column="1" Style="{StaticResource CaptureButton}"
+                            Click="CaptureRegion_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="✂️" FontSize="28" HorizontalAlignment="Center"/>
+                            <TextBlock Text="영역 선택" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+S" FontSize="10" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button x:Name="MonitorSelectButton" Grid.Column="2" Style="{StaticResource CaptureButton}"
+                            Click="MonitorSelectButton_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="🖥️" FontSize="28" HorizontalAlignment="Center"/>
+                            <TextBlock Text="모니터 선택" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="MonitorSelectHint" Text="1개 모니터" FontSize="10" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Grid.Column="3" Style="{StaticResource CaptureButton}"
+                            Click="CaptureDelayed_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="⏱️" FontSize="28" HorizontalAlignment="Center"/>
+                            <TextBlock Text="지연 캡처" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+D" FontSize="10" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+            </StackPanel>
+        </Border>
+
+        <!-- 미리보기 영역 - 가로 스크롤 썸네일 리스트 -->
+        <Border Grid.Row="2" Background="#1e1e1e" Padding="20,10">
+            <Grid>
+                <!-- 빈 상태 메시지 -->
+                <StackPanel x:Name="EmptyState" HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="📷" FontSize="48" HorizontalAlignment="Center"
+                               Foreground="#555555"/>
+                    <TextBlock Text="캡처한 이미지가 여기에 표시됩니다" FontSize="14"
+                               Foreground="#666666" Margin="0,15,0,0"/>
+                    <TextBlock Text="위 버튼을 클릭하거나 단축키를 사용하세요" FontSize="12"
+                               Foreground="#555555" Margin="0,5,0,0"/>
+                </StackPanel>
+
+                <!-- 썸네일 스크롤 영역 -->
+                <ScrollViewer x:Name="ThumbnailScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled"
+                              VerticalAlignment="Center"
+                              Visibility="Collapsed">
+                    <StackPanel x:Name="ThumbnailPanel" Orientation="Horizontal" VerticalAlignment="Center"/>
+                </ScrollViewer>
+
+                <!-- 복사 완료 표시 (오버레이) -->
+                <Border x:Name="CopyOverlay" Background="#80000000" CornerRadius="8"
+                        Visibility="Collapsed" IsHitTestVisible="False">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="✓" FontSize="48" Foreground="#4CAF50" HorizontalAlignment="Center"/>
+                        <TextBlock Text="클립보드에 복사됨" FontSize="16" Foreground="White" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- 하단 정보 바 -->
+        <Border Grid.Row="3" Background="#252525" Padding="15,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="저장 위치: " Foreground="#888888" FontSize="12"/>
+                    <TextBlock x:Name="SavePathText" Text="-" Foreground="#aaaaaa" FontSize="12"
+                               Cursor="Hand" MouseLeftButtonDown="SavePathText_Click">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="TextDecorations" Value="Underline"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0">
+                    <TextBlock Text="엔진: " Foreground="#888888" FontSize="12"/>
+                    <TextBlock x:Name="EngineText" Text="-" Foreground="#aaaaaa" FontSize="12"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <TextBlock Text="크기: " Foreground="#888888" FontSize="12"/>
+                    <TextBlock x:Name="SizeText" Text="-" Foreground="#aaaaaa" FontSize="12"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 시스템 트레이 아이콘 -->
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        ToolTipText="Smart Capture"
+                        TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="전체 화면 캡처" Click="TrayMenu_FullScreen_Click"/>
+                    <MenuItem Header="영역 선택 캡처" Click="TrayMenu_Region_Click"/>
+                    <MenuItem x:Name="TrayMonitorMenu" Header="모니터 선택 캡처"/>
+                    <Separator/>
+                    <MenuItem Header="창 열기" Click="TrayMenu_Show_Click"/>
+                    <MenuItem Header="설정" Click="TrayMenu_Settings_Click"/>
+                    <Separator/>
+                    <MenuItem Header="종료" Click="TrayMenu_Exit_Click"/>
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
+    </Grid>
+</Window>

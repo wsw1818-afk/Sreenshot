@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>SmartCapture</AssemblyName>
+    <RootNamespace>Screenshot</RootNamespace>
+
+    <!-- Per-Monitor DPI Awareness V2 -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+
+    <!-- 배포 설정 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 시스템 트레이 아이콘 -->
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+
+    <!-- 전역 단축키 -->
+    <PackageReference Include="NHotkey.Wpf" Version="3.0.0" />
+
+    <!-- JSON 설정 저장 -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+
+    <!-- DXGI Desktop Duplication -->
+    <PackageReference Include="SharpDX" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+  </ItemGroup>
+
+</Project>

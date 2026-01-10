@@ -1,0 +1,75 @@
+<Window x:Class="Screenshot.Views.CaptureOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="영역 선택"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Black"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Cursor="Cross"
+        KeyDown="Window_KeyDown"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown"
+        MouseMove="Window_MouseMove"
+        MouseLeftButtonUp="Window_MouseLeftButtonUp">
+
+    <Grid>
+        <!-- 캡처된 화면 배경 -->
+        <Image x:Name="BackgroundImage" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+
+        <!-- 어두운 오버레이 (선택 영역 제외) -->
+        <Rectangle x:Name="DimOverlay" Fill="#80000000"/>
+
+        <!-- 선택 영역 캔버스 -->
+        <Canvas x:Name="SelectionCanvas">
+            <!-- 선택 사각형 -->
+            <Border x:Name="SelectionBorder"
+                    BorderBrush="#0078d4"
+                    BorderThickness="2"
+                    Background="Transparent"
+                    Visibility="Collapsed">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="5" Opacity="0.5" ShadowDepth="0"/>
+                </Border.Effect>
+            </Border>
+
+            <!-- 크기 표시 레이블 -->
+            <Border x:Name="SizeLabel"
+                    Background="#cc000000"
+                    CornerRadius="4"
+                    Padding="8,4"
+                    Visibility="Collapsed">
+                <TextBlock x:Name="SizeText"
+                           Foreground="White"
+                           FontSize="12"
+                           FontFamily="Consolas"/>
+            </Border>
+        </Canvas>
+
+        <!-- 안내 텍스트 -->
+        <Border x:Name="HelpPanel"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="#cc1e1e1e"
+                Padding="30,20"
+                CornerRadius="8">
+            <Border.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="20" Opacity="0.5" ShadowDepth="0"/>
+            </Border.Effect>
+
+            <StackPanel>
+                <TextBlock Text="드래그하여 캡처할 영역을 선택하세요"
+                           Foreground="White"
+                           FontSize="18"
+                           HorizontalAlignment="Center"/>
+
+                <TextBlock Text="ESC: 취소  |  Enter: 전체 화면 캡처"
+                           Foreground="#888888"
+                           FontSize="12"
+                           HorizontalAlignment="Center"
+                           Margin="0,10,0,0"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
