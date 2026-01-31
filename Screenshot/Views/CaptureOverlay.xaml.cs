@@ -33,6 +33,9 @@ public partial class CaptureOverlay : Window
     // 이미지 내 선택 영역 (잘라내기용)
     private Rectangle _imageRegion;
 
+    // 십자선 길이
+    private const double CrosshairLength = 20;
+
     public Rectangle SelectedRegion => _selectedRegion;
     public Rectangle ImageRegion => _imageRegion;
     public System.Drawing.Bitmap? CapturedScreen => _capturedScreen;
@@ -66,6 +69,44 @@ public partial class CaptureOverlay : Window
         Top = _screenY;
         Width = _screenWidth;
         Height = _screenHeight;
+
+        // 마우스 이동 이벤트로 십자선 업데이트
+        MouseMove += UpdateCrosshair;
+    }
+
+    private void UpdateCrosshair(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        var pos = e.GetPosition(this);
+        double x = pos.X;
+        double y = pos.Y;
+
+        // 가로선 (배경)
+        CrosshairHorizontalBg.X1 = x - CrosshairLength;
+        CrosshairHorizontalBg.Y1 = y;
+        CrosshairHorizontalBg.X2 = x + CrosshairLength;
+        CrosshairHorizontalBg.Y2 = y;
+
+        // 가로선 (흰색)
+        CrosshairHorizontal.X1 = x - CrosshairLength;
+        CrosshairHorizontal.Y1 = y;
+        CrosshairHorizontal.X2 = x + CrosshairLength;
+        CrosshairHorizontal.Y2 = y;
+
+        // 세로선 (배경)
+        CrosshairVerticalBg.X1 = x;
+        CrosshairVerticalBg.Y1 = y - CrosshairLength;
+        CrosshairVerticalBg.X2 = x;
+        CrosshairVerticalBg.Y2 = y + CrosshairLength;
+
+        // 세로선 (흰색)
+        CrosshairVertical.X1 = x;
+        CrosshairVertical.Y1 = y - CrosshairLength;
+        CrosshairVertical.X2 = x;
+        CrosshairVertical.Y2 = y + CrosshairLength;
+
+        // 중앙 원
+        Canvas.SetLeft(CrosshairCenter, x - 3);
+        Canvas.SetTop(CrosshairCenter, y - 3);
     }
 
     /// <summary>

@@ -8,7 +8,7 @@
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        Cursor="Cross"
+        Cursor="None"
         KeyDown="Window_KeyDown"
         MouseLeftButtonDown="Window_MouseLeftButtonDown"
         MouseMove="Window_MouseMove"
@@ -20,6 +20,18 @@
 
         <!-- 어두운 오버레이 (선택 영역 제외) -->
         <Rectangle x:Name="DimOverlay" Fill="#80000000"/>
+
+        <!-- 커스텀 십자선 커서 -->
+        <Canvas x:Name="CrosshairCanvas" IsHitTestVisible="False">
+            <!-- 가로선 (흰색 + 검은 테두리) -->
+            <Line x:Name="CrosshairHorizontalBg" Stroke="Black" StrokeThickness="3" IsHitTestVisible="False"/>
+            <Line x:Name="CrosshairHorizontal" Stroke="White" StrokeThickness="1" IsHitTestVisible="False"/>
+            <!-- 세로선 (흰색 + 검은 테두리) -->
+            <Line x:Name="CrosshairVerticalBg" Stroke="Black" StrokeThickness="3" IsHitTestVisible="False"/>
+            <Line x:Name="CrosshairVertical" Stroke="White" StrokeThickness="1" IsHitTestVisible="False"/>
+            <!-- 중앙 원형 표시 -->
+            <Ellipse x:Name="CrosshairCenter" Width="6" Height="6" Stroke="White" StrokeThickness="1" Fill="Transparent" IsHitTestVisible="False"/>
+        </Canvas>
 
         <!-- 선택 영역 캔버스 -->
         <Canvas x:Name="SelectionCanvas">
