@@ -39,6 +39,10 @@ public partial class CaptureOverlay : Window
     private readonly int _screenWidth;
     private readonly int _screenHeight;
 
+    // WPF 좌표계 화면 크기 (DPI 스케일 적용)
+    private double _wpfScreenWidth;
+    private double _wpfScreenHeight;
+
     // 캡처된 전체 화면 이미지
     private System.Drawing.Bitmap? _capturedScreen;
 
@@ -62,7 +66,7 @@ public partial class CaptureOverlay : Window
     {
         InitializeComponent();
 
-        // 가상 화면 크기 (System.Windows.Forms 사용)
+        // 가상 화면 크기 (System.Windows.Forms 사용) - 물리적 픽셀
         var virtualScreen = SystemInformation.VirtualScreen;
         _screenX = virtualScreen.X;
         _screenY = virtualScreen.Y;
@@ -72,31 +76,31 @@ public partial class CaptureOverlay : Window
         // 전달받은 캡처 이미지 저장
         _capturedScreen = capturedScreen;
 
-        // 배경 이미지 설정
+        // DPI 스케일 먼저 계산 (창 표시 전)
+        using (var g = Graphics.FromHwnd(IntPtr.Zero))
+        {
+            _dpiScale = g.DpiX / 96.0;
+        }
+
+        // WPF 좌표계 크기 계산 (물리적 픽셀 / DPI 스케일)
+        _wpfScreenWidth = _screenWidth / _dpiScale;
+        _wpfScreenHeight = _screenHeight / _dpiScale;
+
+        // 배경 이미지 설정 - WPF 좌표계 크기 사용
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
         BackgroundImage.Source = bitmapSource;
-        BackgroundImage.Width = _screenWidth;
-        BackgroundImage.Height = _screenHeight;
+        BackgroundImage.Width = _wpfScreenWidth;
+        BackgroundImage.Height = _wpfScreenHeight;
 
-        // 창 설정
+        // 창 설정 - WPF 좌표계 크기 사용
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = _screenX;
-        Top = _screenY;
-        Width = _screenWidth;
-        Height = _screenHeight;
+        Left = _screenX / _dpiScale;
+        Top = _screenY / _dpiScale;
+        Width = _wpfScreenWidth;
+        Height = _wpfScreenHeight;
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
-
-        // DPI 스케일 계산
-        Loaded += (s, e) =>
-        {
-            var source = PresentationSource.FromVisual(this);
-            if (source?.CompositionTarget != null)
-            {
-                _dpiScale = source.CompositionTarget.TransformToDevice.M11;
-            }
-        };
     }
 
     /// <summary>
@@ -287,7 +291,8 @@ public partial class CaptureOverlay : Window
 
     private void UpdateBackgroundMask(double x, double y, double width, double height)
     {
-        var fullRect = new RectangleGeometry(new Rect(0, 0, _screenWidth, _screenHeight));
+        // WPF 좌표계 크기 사용
+        var fullRect = new RectangleGeometry(new Rect(0, 0, _wpfScreenWidth, _wpfScreenHeight));
         var selectionRect = new RectangleGeometry(new Rect(x, y, width, height));
 
         var combinedGeometry = new CombinedGeometry(
