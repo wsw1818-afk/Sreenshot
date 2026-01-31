@@ -27,9 +27,9 @@ public partial class CaptureOverlay : Window
         public int Y;
     }
 
-    // 물리적 좌표로 시작점과 현재점 저장 (물리적 픽셀)
-    private System.Drawing.Point _startPointPhysical;
-    private System.Drawing.Point _currentPointPhysical;
+    // WPF 좌표로 시작점과 현재점 저장 (UI 표시용)
+    private System.Windows.Point _startPointWpf;
+    private System.Windows.Point _currentPointWpf;
     private bool _isSelecting;
     private Rectangle _selectedRegion;
 
@@ -100,7 +100,7 @@ public partial class CaptureOverlay : Window
     }
 
     /// <summary>
-    /// 물리적 마우스 좌표 가져오기 (DPI 스케일 영향 없음)
+    /// 물리적 마우스 좌표 가져오기 (이미지 좌표계)
     /// </summary>
     private System.Drawing.Point GetPhysicalMousePosition()
     {
@@ -108,10 +108,20 @@ public partial class CaptureOverlay : Window
         return new System.Drawing.Point(pt.X - _screenX, pt.Y - _screenY);
     }
 
+    /// <summary>
+    /// WPF 좌표를 물리적 좌표로 변환 (DPI 스케일 적용)
+    /// </summary>
+    private System.Drawing.Point WpfToPhysical(System.Windows.Point wpfPoint)
+    {
+        return new System.Drawing.Point(
+            (int)Math.Round(wpfPoint.X * _dpiScale),
+            (int)Math.Round(wpfPoint.Y * _dpiScale));
+    }
+
     private void UpdateCrosshair(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
-        var pos = GetPhysicalMousePosition();
+        // WPF 좌표 사용 (UI 표시용)
+        var pos = e.GetPosition(this);
         double x = pos.X;
         double y = pos.Y;
 
@@ -195,8 +205,8 @@ public partial class CaptureOverlay : Window
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
-        _startPointPhysical = GetPhysicalMousePosition();
+        // WPF 좌표 저장 (UI 표시용)
+        _startPointWpf = e.GetPosition(this);
         _isSelecting = true;
 
         HelpPanel.Visibility = Visibility.Collapsed;
@@ -204,8 +214,8 @@ public partial class CaptureOverlay : Window
         SelectionBorder.Visibility = Visibility.Visible;
         SizeLabel.Visibility = Visibility.Visible;
 
-        Canvas.SetLeft(SelectionBorder, _startPointPhysical.X);
-        Canvas.SetTop(SelectionBorder, _startPointPhysical.Y);
+        Canvas.SetLeft(SelectionBorder, _startPointWpf.X);
+        Canvas.SetTop(SelectionBorder, _startPointWpf.Y);
         SelectionBorder.Width = 0;
         SelectionBorder.Height = 0;
     }
@@ -214,20 +224,23 @@ public partial class CaptureOverlay : Window
     {
         if (!_isSelecting) return;
 
-        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
-        _currentPointPhysical = GetPhysicalMousePosition();
+        // WPF 좌표 사용 (UI 표시용)
+        _currentPointWpf = e.GetPosition(this);
 
-        int x = Math.Min(_startPointPhysical.X, _currentPointPhysical.X);
-        int y = Math.Min(_startPointPhysical.Y, _currentPointPhysical.Y);
-        int width = Math.Abs(_currentPointPhysical.X - _startPointPhysical.X);
-        int height = Math.Abs(_currentPointPhysical.Y - _startPointPhysical.Y);
+        double x = Math.Min(_startPointWpf.X, _currentPointWpf.X);
+        double y = Math.Min(_startPointWpf.Y, _currentPointWpf.Y);
+        double width = Math.Abs(_currentPointWpf.X - _startPointWpf.X);
+        double height = Math.Abs(_currentPointWpf.Y - _startPointWpf.Y);
 
         Canvas.SetLeft(SelectionBorder, x);
         Canvas.SetTop(SelectionBorder, y);
         SelectionBorder.Width = width;
         SelectionBorder.Height = height;
 
-        SizeText.Text = $"{width} x {height}";
+        // 물리적 픽셀 크기로 표시 (실제 캡처될 크기)
+        var physicalWidth = (int)Math.Round(width * _dpiScale);
+        var physicalHeight = (int)Math.Round(height * _dpiScale);
+        SizeText.Text = $"{physicalWidth} x {physicalHeight}";
 
         var labelTop = y - 30;
         if (labelTop < 0) labelTop = y + height + 5;
@@ -244,24 +257,29 @@ public partial class CaptureOverlay : Window
 
         _isSelecting = false;
 
-        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
-        _currentPointPhysical = GetPhysicalMousePosition();
+        // WPF 좌표 사용 (UI 표시용)
+        _currentPointWpf = e.GetPosition(this);
 
-        int x = Math.Min(_startPointPhysical.X, _currentPointPhysical.X);
-        int y = Math.Min(_startPointPhysical.Y, _currentPointPhysical.Y);
-        int width = Math.Abs(_currentPointPhysical.X - _startPointPhysical.X);
-        int height = Math.Abs(_currentPointPhysical.Y - _startPointPhysical.Y);
+        double wpfX = Math.Min(_startPointWpf.X, _currentPointWpf.X);
+        double wpfY = Math.Min(_startPointWpf.Y, _currentPointWpf.Y);
+        double wpfWidth = Math.Abs(_currentPointWpf.X - _startPointWpf.X);
+        double wpfHeight = Math.Abs(_currentPointWpf.Y - _startPointWpf.Y);
 
-        if (width < 10 || height < 10)
+        if (wpfWidth < 10 || wpfHeight < 10)
         {
             DialogResult = false;
             Close();
             return;
         }
 
-        // 물리적 좌표 그대로 사용
-        _selectedRegion = new Rectangle(_screenX + x, _screenY + y, width, height);
-        _imageRegion = new Rectangle(x, y, width, height);
+        // WPF 좌표를 물리적 좌표로 변환 (이미지 캡처용)
+        int physicalX = (int)Math.Round(wpfX * _dpiScale);
+        int physicalY = (int)Math.Round(wpfY * _dpiScale);
+        int physicalWidth = (int)Math.Round(wpfWidth * _dpiScale);
+        int physicalHeight = (int)Math.Round(wpfHeight * _dpiScale);
+
+        _selectedRegion = new Rectangle(_screenX + physicalX, _screenY + physicalY, physicalWidth, physicalHeight);
+        _imageRegion = new Rectangle(physicalX, physicalY, physicalWidth, physicalHeight);
 
         DialogResult = true;
         Close();
