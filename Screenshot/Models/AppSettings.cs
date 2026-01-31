@@ -83,6 +83,26 @@ public class AppSettings
     /// </summary>
     public int DelaySeconds { get; set; } = 3;
 
+    /// <summary>
+    /// 다크 모드 (true: 다크, false: 라이트)
+    /// </summary>
+    public bool DarkMode { get; set; } = true;
+
+    /// <summary>
+    /// 토스트 알림 표시
+    /// </summary>
+    public bool ShowToastNotification { get; set; } = true;
+
+    /// <summary>
+    /// 전역 단축키 활성화
+    /// </summary>
+    public bool EnableGlobalHotkeys { get; set; } = true;
+
+    /// <summary>
+    /// 캡처 후 편집 창 자동 열기
+    /// </summary>
+    public bool AutoOpenEditor { get; set; } = false;
+
     #region 단축키 설정
 
     /// <summary>전체 화면 캡처 단축키</summary>

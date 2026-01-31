@@ -6,8 +6,6 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Forms;
-using NHotkey;
-using NHotkey.Wpf;
 using Screenshot.Models;
 using Screenshot.Services;
 using Screenshot.Services.Capture;
@@ -19,10 +17,16 @@ public partial class MainWindow : Window
 {
     private readonly AppSettings _settings;
     private readonly CaptureManager _captureManager;
+    private readonly HotkeyService _hotkeyService;
+    private readonly NotificationService _notificationService;
+    private readonly WindowCaptureService _windowCaptureService;
+    private readonly ScrollCaptureService _scrollCaptureService;
+    private readonly ChromeCaptureService _chromeCaptureService;
+    private readonly OcrService _ocrService;
     private readonly List<CaptureResult> _captureHistory = new();
     private CaptureResult? _selectedCapture;
     private bool _isExiting;
-    private bool _isCapturing; // 캡처 중 플래그 (중복 캡처 방지)
+    private bool _isCapturing;
 
     public MainWindow()
     {
@@ -31,17 +35,24 @@ public partial class MainWindow : Window
         // 설정 로드
         _settings = AppSettings.Load();
 
-        // 캡처 매니저 초기화
+        // 서비스 초기화
         _captureManager = new CaptureManager(_settings);
         _captureManager.CaptureCompleted += OnCaptureCompleted;
         _captureManager.StatusChanged += OnStatusChanged;
+
+        _hotkeyService = new HotkeyService();
+        _notificationService = new NotificationService();
+        _windowCaptureService = new WindowCaptureService();
+        _scrollCaptureService = new ScrollCaptureService();
+        _chromeCaptureService = new ChromeCaptureService();
+        _ocrService = new OcrService();
 
         // UI 초기화
         UpdateSavePathDisplay();
         InitializeMonitorButtons();
 
-        // 전역 단축키 비활성화 - 보안 프로그램 차단
-        // RegisterHotkeys();
+        // 창 로드 후 단축키 등록
+        Loaded += MainWindow_Loaded;
 
         // 시작 시 최소화 옵션
         if (_settings.StartMinimized)
@@ -54,11 +65,30 @@ public partial class MainWindow : Window
         }
     }
 
-    #region 전역 단축키 (비활성화 - 보안 프로그램 차단)
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // 전역 단축키 초기화
+        if (_settings.EnableGlobalHotkeys)
+        {
+            _hotkeyService.Initialize(this);
+            _hotkeyService.FullScreenCapture += () => SafeExecuteAsync(CaptureFullScreenAsync);
+            _hotkeyService.RegionCapture += () => SafeExecuteAsync(CaptureRegionAsync);
+            _hotkeyService.DelayedCapture += () => SafeExecuteAsync(CaptureDelayedAsync);
+            _hotkeyService.WindowCapture += () => SafeExecuteAsync(CaptureWindowAsync);
 
-    /// <summary>
-    /// 비동기 작업을 안전하게 실행하고 예외 처리
-    /// </summary>
+            if (_hotkeyService.RegisterHotkeys())
+            {
+                StatusText.Text = "준비됨 (단축키 활성화)";
+            }
+            else
+            {
+                StatusText.Text = "준비됨 (단축키 등록 실패)";
+            }
+        }
+    }
+
+    #region 비동기 작업 헬퍼
+
     private async void SafeExecuteAsync(Func<Task> asyncAction)
     {
         try
@@ -71,6 +101,10 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 StatusText.Text = $"오류: {ex.Message}";
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError(ex.Message);
+                }
             });
         }
     }
@@ -81,34 +115,18 @@ public partial class MainWindow : Window
 
     private async Task CaptureFullScreenAsync()
     {
-        // 중복 캡처 방지
         if (_isCapturing) return;
         _isCapturing = true;
-
-        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SmartCapture_Log.txt");
 
         try
         {
             StatusText.Text = "전체 화면 캡처 중...";
-            File.AppendAllLines(logPath, new[]
-            {
-                $"=== 전체 화면 캡처 시도: {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==="
-            });
 
-            // 창을 잠시 숨김
             var wasVisible = IsVisible;
             if (wasVisible) Hide();
-            await Task.Delay(300); // 창이 완전히 사라질 때까지 대기 (잔상 방지)
+            await Task.Delay(200);
 
             var result = await _captureManager.CaptureFullScreenAsync();
-
-            File.AppendAllLines(logPath, new[]
-            {
-                $"캡처 결과: Success={result.Success}, Engine={result.EngineName}",
-                result.Image != null ? $"이미지 크기: {result.Image.Width}x{result.Image.Height}" : "이미지: null",
-                result.ErrorMessage ?? "",
-                ""
-            });
 
             if (wasVisible)
             {
@@ -127,17 +145,14 @@ public partial class MainWindow : Window
 
     private async Task CaptureRegionAsync()
     {
-        // 중복 캡처 방지
         if (_isCapturing) return;
         _isCapturing = true;
 
         try
         {
-            // 창을 숨기고 화면 캡처
             Hide();
-            await Task.Delay(300); // 창이 완전히 숨겨질 때까지 대기 (잔상 방지)
+            await Task.Delay(200);
 
-            // 화면 캡처 (오버레이 표시 전)
             var capturedScreen = CaptureOverlay.CaptureScreen();
             if (capturedScreen == null)
             {
@@ -146,77 +161,29 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // 캡처된 이미지로 오버레이 표시
             var overlay = new CaptureOverlay(capturedScreen);
             var dialogResult = overlay.ShowDialog();
 
             if (dialogResult == true && overlay.SelectedRegion != System.Drawing.Rectangle.Empty && overlay.CapturedScreen != null)
             {
-                var region = overlay.SelectedRegion;
-                var imageRegion = overlay.ImageRegion;  // 이미지 내 좌표 사용
+                var imageRegion = overlay.ImageRegion;
+                StatusText.Text = $"영역 캡처 중...";
 
-                // 로그 파일에 기록
-                var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SmartCapture_Log.txt");
-                var logLines = new List<string>
-                {
-                    $"=== 캡처 시도: {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===",
-                    $"선택된 영역: X={region.X}, Y={region.Y}, W={region.Width}, H={region.Height}",
-                    $"이미지 영역: X={imageRegion.X}, Y={imageRegion.Y}, W={imageRegion.Width}, H={imageRegion.Height}",
-                    $"캡처 이미지 크기: {overlay.CapturedScreen.Width}x{overlay.CapturedScreen.Height}",
-                    $"화면 정보: screenX={SystemInformation.VirtualScreen.X}, screenY={SystemInformation.VirtualScreen.Y}"
-                };
-                File.AppendAllLines(logPath, logLines);
-
-                Debug.WriteLine($"선택된 영역: X={region.X}, Y={region.Y}, W={region.Width}, H={region.Height}");
-                Debug.WriteLine($"이미지 영역: X={imageRegion.X}, Y={imageRegion.Y}, W={imageRegion.Width}, H={imageRegion.Height}");
-                Debug.WriteLine($"이미지 크기: {overlay.CapturedScreen.Width}x{overlay.CapturedScreen.Height}");
-                StatusText.Text = $"영역 캡처 중... ({region.Width}x{region.Height})";
-
-                // 이미지 내 좌표로 직접 잘라내기
-                var cropX = imageRegion.X;
-                var cropY = imageRegion.Y;
-                var cropWidth = imageRegion.Width;
-                var cropHeight = imageRegion.Height;
-
-                // 범위 검증
-                if (cropX < 0) cropX = 0;
-                if (cropY < 0) cropY = 0;
-                if (cropX + cropWidth > overlay.CapturedScreen.Width)
-                    cropWidth = overlay.CapturedScreen.Width - cropX;
-                if (cropY + cropHeight > overlay.CapturedScreen.Height)
-                    cropHeight = overlay.CapturedScreen.Height - cropY;
+                var cropX = Math.Max(0, imageRegion.X);
+                var cropY = Math.Max(0, imageRegion.Y);
+                var cropWidth = Math.Min(imageRegion.Width, overlay.CapturedScreen.Width - cropX);
+                var cropHeight = Math.Min(imageRegion.Height, overlay.CapturedScreen.Height - cropY);
 
                 var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
+                var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
 
-                // 잘라내기 전 로그
-                File.AppendAllLines(logPath, new[]
+                var result = new CaptureResult
                 {
-                    $"잘라내기 영역: X={cropRect.X}, Y={cropRect.Y}, W={cropRect.Width}, H={cropRect.Height}",
-                    $"잘라내기 시작..."
-                });
-
-                Debug.WriteLine($"잘라내기 영역: X={cropRect.X}, Y={cropRect.Y}, W={cropRect.Width}, H={cropRect.Height}");
-
-                try
-                {
-                    var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
-                    File.AppendAllLines(logPath, new[] { $"잘라내기 성공: {croppedImage.Width}x{croppedImage.Height}", "" });
-
-                    var result = new CaptureResult
-                    {
-                        Success = true,
-                        Image = croppedImage,
-                        EngineName = "OverlayCapture"
-                    };
-                    HandleCaptureResult(result);
-                }
-                catch (Exception ex)
-                {
-                    File.AppendAllLines(logPath, new[] { $"잘라내기 실패: {ex.Message}", "" });
-                    throw;
-                }
-
-                // 원본 이미지 해제
+                    Success = true,
+                    Image = croppedImage,
+                    EngineName = "RegionCapture"
+                };
+                HandleCaptureResult(result);
                 overlay.CapturedScreen.Dispose();
             }
             else
@@ -224,7 +191,6 @@ public partial class MainWindow : Window
                 overlay.CapturedScreen?.Dispose();
             }
 
-            // 캡처 후 창 다시 표시
             Show();
             InvalidateVisual();
             UpdateLayout();
@@ -237,18 +203,15 @@ public partial class MainWindow : Window
 
     private async Task CaptureDelayedAsync()
     {
-        // 중복 캡처 방지
         if (_isCapturing) return;
         _isCapturing = true;
 
         try
         {
-            // 창을 숨기고 카운트다운
             Hide();
 
             for (int i = _settings.DelaySeconds; i > 0; i--)
             {
-                // TODO: 화면에 카운트다운 표시
                 StatusText.Text = $"{i}초 후 캡처...";
                 await Task.Delay(1000);
             }
@@ -256,7 +219,6 @@ public partial class MainWindow : Window
             var result = await _captureManager.CaptureFullScreenAsync();
             HandleCaptureResult(result);
 
-            // 캡처 후 창 다시 표시
             Show();
             InvalidateVisual();
             UpdateLayout();
@@ -267,7 +229,185 @@ public partial class MainWindow : Window
         }
     }
 
-    private const int MaxHistoryCount = 10; // 최대 히스토리 개수
+    private async Task CaptureWindowAsync()
+    {
+        if (_isCapturing) return;
+        _isCapturing = true;
+
+        try
+        {
+            Hide();
+            await Task.Delay(200);
+
+            // 활성 창 캡처
+            var bitmap = _windowCaptureService.CaptureActiveWindow();
+
+            Show();
+            InvalidateVisual();
+            UpdateLayout();
+
+            if (bitmap != null)
+            {
+                var result = new CaptureResult
+                {
+                    Success = true,
+                    Image = bitmap,
+                    EngineName = "WindowCapture"
+                };
+                HandleCaptureResult(result);
+            }
+            else
+            {
+                StatusText.Text = "창 캡처 실패";
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError("창 캡처에 실패했습니다.");
+                }
+            }
+        }
+        finally
+        {
+            _isCapturing = false;
+        }
+    }
+
+    private async Task CaptureScrollAsync()
+    {
+        if (_isCapturing) return;
+        _isCapturing = true;
+
+        try
+        {
+            // 스크롤 캡처 방식 선택
+            var captureChoice = System.Windows.MessageBox.Show(
+                "스크롤 캡처 방식을 선택하세요:\n\n" +
+                "● [예] Chrome 전체 페이지 캡처 (권장)\n" +
+                "   - 스티칭 없이 완벽한 이미지\n" +
+                "   - Chrome이 자동으로 시작됩니다\n\n" +
+                "● [아니오] 일반 스크롤 캡처\n" +
+                "   - 모든 프로그램에서 사용 가능\n" +
+                "   - 스크롤하며 캡처 후 합성",
+                "스크롤 캡처 방식 선택",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question);
+
+            if (captureChoice == MessageBoxResult.Cancel)
+            {
+                return;
+            }
+
+            if (captureChoice == MessageBoxResult.Yes)
+            {
+                await CaptureWithChromeCdpAsync();
+                return;
+            }
+
+            // 일반 스크롤 캡처
+            System.Windows.MessageBox.Show(
+                "스크롤 캡처를 시작합니다.\n\n" +
+                "1. 확인을 누르면 3초 후 캡처가 시작됩니다.\n" +
+                "2. 캡처할 창을 클릭하여 활성화하세요.\n" +
+                "3. 자동으로 스크롤하며 캡처합니다.",
+                "스크롤 캡처",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            Hide();
+
+            // 3초 카운트다운
+            for (int i = 3; i > 0; i--)
+            {
+                await Task.Delay(1000);
+            }
+
+            StatusText.Text = "스크롤 캡처 중...";
+
+            _scrollCaptureService.ProgressChanged += (current, total) =>
+            {
+                Dispatcher.Invoke(() => StatusText.Text = $"스크롤 캡처 중... ({current}장)");
+            };
+
+            var bitmap = await _scrollCaptureService.CaptureScrollingWindowAsync(400);
+
+            Show();
+            InvalidateVisual();
+            UpdateLayout();
+
+            if (bitmap != null)
+            {
+                var result = new CaptureResult
+                {
+                    Success = true,
+                    Image = bitmap,
+                    EngineName = "ScrollCapture"
+                };
+                HandleCaptureResult(result);
+            }
+            else
+            {
+                StatusText.Text = "스크롤 캡처 실패";
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError("스크롤 캡처에 실패했습니다.");
+                }
+            }
+        }
+        finally
+        {
+            _isCapturing = false;
+        }
+    }
+
+    private async Task CaptureWithChromeCdpAsync()
+    {
+        try
+        {
+            // 항상 URL 입력 받기 (Google Sheets 등 동적 페이지 지원)
+            var urlDialog = new Views.UrlInputDialog();
+            if (urlDialog.ShowDialog() != true || string.IsNullOrWhiteSpace(urlDialog.Url))
+            {
+                return;
+            }
+            string targetUrl = urlDialog.Url;
+
+            _chromeCaptureService.StatusChanged += status =>
+            {
+                Dispatcher.Invoke(() => StatusText.Text = status);
+            };
+
+            // URL을 지정하여 캡처 (Google Sheets는 자동으로 키보드 스크롤 캡처 사용)
+            Bitmap? bitmap = await _chromeCaptureService.CaptureUrlAsync(targetUrl);
+
+            if (bitmap != null)
+            {
+                var result = new CaptureResult
+                {
+                    Success = true,
+                    Image = bitmap,
+                    EngineName = "ChromeCDP"
+                };
+                HandleCaptureResult(result);
+            }
+            else
+            {
+                StatusText.Text = "Chrome 캡처 실패";
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError("Chrome CDP 캡처에 실패했습니다.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Chrome 캡처 오류: {ex.Message}";
+            if (_settings.ShowToastNotification)
+            {
+                _notificationService.ShowCaptureError($"Chrome 캡처 오류: {ex.Message}");
+            }
+        }
+    }
+
+    private const int MaxHistoryCount = 10;
 
     private void HandleCaptureResult(CaptureResult result)
     {
@@ -275,32 +415,52 @@ public partial class MainWindow : Window
         {
             if (result.Success && result.Image != null)
             {
-                // 히스토리가 최대 개수를 초과하면 가장 오래된 것 제거
+                // 자동 저장
+                if (_settings.AutoSave)
+                {
+                    var fileName = $"capture_{DateTime.Now:yyyyMMdd_HHmmss}.{_settings.ImageFormat.ToLower()}";
+                    var filePath = Path.Combine(_settings.SaveFolder, fileName);
+
+                    try
+                    {
+                        Directory.CreateDirectory(_settings.SaveFolder);
+                        var format = _settings.ImageFormat.ToUpper() switch
+                        {
+                            "PNG" => ImageFormat.Png,
+                            "JPEG" or "JPG" => ImageFormat.Jpeg,
+                            "BMP" => ImageFormat.Bmp,
+                            _ => ImageFormat.Png
+                        };
+                        result.Image.Save(filePath, format);
+                        result.SavedFilePath = filePath;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"자동 저장 실패: {ex.Message}");
+                    }
+                }
+
+                // 히스토리 관리
                 while (_captureHistory.Count >= MaxHistoryCount)
                 {
                     var oldest = _captureHistory[0];
                     _captureHistory.RemoveAt(0);
-                    oldest.Dispose(); // 메모리 해제
+                    oldest.Dispose();
 
-                    // 썸네일도 제거
                     if (ThumbnailPanel.Children.Count > 0)
                     {
                         ThumbnailPanel.Children.RemoveAt(0);
                     }
                 }
 
-                // 히스토리에 추가
                 _captureHistory.Add(result);
                 _selectedCapture = result;
 
-                // 썸네일 추가
                 AddThumbnail(result);
 
-                // 빈 상태 숨기고 스크롤 표시
                 EmptyState.Visibility = Visibility.Collapsed;
                 ThumbnailScrollViewer.Visibility = Visibility.Visible;
 
-                // 정보 업데이트
                 EngineText.Text = result.EngineName;
                 SizeText.Text = $"{result.Image.Width} x {result.Image.Height}";
 
@@ -311,19 +471,35 @@ public partial class MainWindow : Window
 
                 StatusText.Text = $"캡처 완료 - {result.EngineName}";
 
-                // 스크롤을 맨 오른쪽(최신)으로 이동
                 ThumbnailScrollViewer.ScrollToRightEnd();
 
-                // 캡처 사운드
-                if (_settings.PlaySound)
+                // 알림
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureSuccess("캡처 완료", result.SavedFilePath);
+                }
+                else if (_settings.PlaySound)
                 {
                     System.Media.SystemSounds.Asterisk.Play();
+                }
+
+                // 자동으로 편집기 열기
+                if (_settings.AutoOpenEditor && result.Image != null)
+                {
+                    OpenImageEditor(result);
                 }
             }
             else
             {
                 StatusText.Text = $"캡처 실패: {result.ErrorMessage}";
-                System.Windows.MessageBox.Show(result.ErrorMessage, "캡처 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError(result.ErrorMessage ?? "알 수 없는 오류");
+                }
+                else
+                {
+                    System.Windows.MessageBox.Show(result.ErrorMessage, "캡처 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
         });
     }
@@ -332,7 +508,6 @@ public partial class MainWindow : Window
     {
         var bitmapSource = ConvertToBitmapSource(result.Image!);
 
-        // 썸네일 컨테이너 (Border + Image)
         var border = new System.Windows.Controls.Border
         {
             Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 37, 37)),
@@ -342,7 +517,7 @@ public partial class MainWindow : Window
             Margin = new Thickness(5),
             Padding = new Thickness(5),
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = $"클릭: 클립보드 복사\n{result.Image!.Width} x {result.Image.Height}\n{result.EngineName}",
+            ToolTip = $"좌클릭: 클립보드 복사\n우클릭: 더 많은 옵션\n{result.Image!.Width} x {result.Image.Height}\n{result.EngineName}",
             Tag = result,
             VerticalAlignment = VerticalAlignment.Center,
             Height = 120
@@ -358,13 +533,184 @@ public partial class MainWindow : Window
 
         border.Child = image;
         border.MouseLeftButtonDown += Thumbnail_Click;
+        border.MouseRightButtonDown += Thumbnail_RightClick;
         border.MouseEnter += Thumbnail_MouseEnter;
         border.MouseLeave += Thumbnail_MouseLeave;
 
         ThumbnailPanel.Children.Add(border);
-
-        // 선택 상태 표시
         UpdateThumbnailSelection(border, true);
+    }
+
+    private void Thumbnail_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Border border && border.Tag is CaptureResult result)
+        {
+            _selectedCapture = result;
+
+            var contextMenu = new System.Windows.Controls.ContextMenu();
+
+            var copyItem = new System.Windows.Controls.MenuItem { Header = "클립보드에 복사" };
+            copyItem.Click += (s, args) => CopyToClipboard(result);
+            contextMenu.Items.Add(copyItem);
+
+            var editItem = new System.Windows.Controls.MenuItem { Header = "편집" };
+            editItem.Click += (s, args) => OpenImageEditor(result);
+            contextMenu.Items.Add(editItem);
+
+            var saveAsItem = new System.Windows.Controls.MenuItem { Header = "다른 이름으로 저장..." };
+            saveAsItem.Click += (s, args) => SaveAs(result);
+            contextMenu.Items.Add(saveAsItem);
+
+            if (_ocrService.IsAvailable)
+            {
+                var ocrItem = new System.Windows.Controls.MenuItem { Header = "텍스트 추출 (OCR)" };
+                ocrItem.Click += async (s, args) => await ExtractTextAsync(result);
+                contextMenu.Items.Add(ocrItem);
+            }
+
+            contextMenu.Items.Add(new System.Windows.Controls.Separator());
+
+            var deleteItem = new System.Windows.Controls.MenuItem { Header = "삭제" };
+            deleteItem.Click += (s, args) => DeleteCapture(result, border);
+            contextMenu.Items.Add(deleteItem);
+
+            contextMenu.IsOpen = true;
+        }
+    }
+
+    private void CopyToClipboard(CaptureResult result)
+    {
+        if (result.Image == null) return;
+
+        try
+        {
+            System.Windows.Clipboard.SetImage(ConvertToBitmapSource(result.Image));
+            StatusText.Text = "클립보드에 복사됨";
+            if (_settings.ShowToastNotification)
+            {
+                _notificationService.ShowClipboardCopy();
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"복사 실패: {ex.Message}";
+        }
+    }
+
+    private void OpenImageEditor(CaptureResult result)
+    {
+        if (result.Image == null) return;
+
+        var editor = new ImageEditorWindow((Bitmap)result.Image.Clone());
+        editor.Owner = this;
+
+        if (editor.ShowDialog() == true && editor.EditedImage != null)
+        {
+            // 편집된 이미지로 교체
+            result.Image.Dispose();
+            result.Image = editor.EditedImage;
+
+            // 썸네일 업데이트
+            UpdateThumbnailImage(result);
+            StatusText.Text = "이미지 편집 완료";
+        }
+    }
+
+    private void UpdateThumbnailImage(CaptureResult result)
+    {
+        foreach (var child in ThumbnailPanel.Children)
+        {
+            if (child is System.Windows.Controls.Border border && border.Tag == result)
+            {
+                if (border.Child is System.Windows.Controls.Image img && result.Image != null)
+                {
+                    img.Source = ConvertToBitmapSource(result.Image);
+                }
+                break;
+            }
+        }
+    }
+
+    private void SaveAs(CaptureResult result)
+    {
+        if (result.Image == null) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "PNG 이미지|*.png|JPEG 이미지|*.jpg|BMP 이미지|*.bmp",
+            DefaultExt = "png",
+            FileName = $"capture_{DateTime.Now:yyyyMMdd_HHmmss}"
+        };
+
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            var format = Path.GetExtension(dialog.FileName).ToLower() switch
+            {
+                ".jpg" or ".jpeg" => ImageFormat.Jpeg,
+                ".bmp" => ImageFormat.Bmp,
+                _ => ImageFormat.Png
+            };
+
+            result.Image.Save(dialog.FileName, format);
+            result.SavedFilePath = dialog.FileName;
+            SavePathText.Text = dialog.FileName;
+            StatusText.Text = "저장 완료";
+
+            if (_settings.ShowToastNotification)
+            {
+                _notificationService.ShowCaptureSuccess("저장 완료", dialog.FileName);
+            }
+        }
+    }
+
+    private async Task ExtractTextAsync(CaptureResult result)
+    {
+        if (result.Image == null) return;
+
+        StatusText.Text = "텍스트 추출 중...";
+
+        var ocrResult = await _ocrService.ExtractTextAsync(result.Image);
+
+        if (ocrResult.Success && !string.IsNullOrWhiteSpace(ocrResult.Text))
+        {
+            System.Windows.Clipboard.SetText(ocrResult.Text);
+            StatusText.Text = "텍스트가 클립보드에 복사됨";
+
+            System.Windows.MessageBox.Show(
+                $"추출된 텍스트:\n\n{ocrResult.Text}\n\n(클립보드에 복사됨)",
+                "OCR 결과",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        else
+        {
+            StatusText.Text = "텍스트를 찾을 수 없음";
+            System.Windows.MessageBox.Show(
+                ocrResult.ErrorMessage ?? "이미지에서 텍스트를 찾을 수 없습니다.",
+                "OCR 결과",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void DeleteCapture(CaptureResult result, System.Windows.Controls.Border border)
+    {
+        _captureHistory.Remove(result);
+        ThumbnailPanel.Children.Remove(border);
+        result.Dispose();
+
+        if (_captureHistory.Count == 0)
+        {
+            EmptyState.Visibility = Visibility.Visible;
+            ThumbnailScrollViewer.Visibility = Visibility.Collapsed;
+            _selectedCapture = null;
+        }
+        else
+        {
+            _selectedCapture = _captureHistory.LastOrDefault();
+        }
+
+        StatusText.Text = "삭제됨";
     }
 
     private void Thumbnail_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
@@ -391,7 +737,6 @@ public partial class MainWindow : Window
         {
             _selectedCapture = result;
 
-            // 모든 썸네일 선택 상태 업데이트
             foreach (var child in ThumbnailPanel.Children)
             {
                 if (child is System.Windows.Controls.Border b)
@@ -400,7 +745,6 @@ public partial class MainWindow : Window
                 }
             }
 
-            // 정보 업데이트
             if (result.Image != null)
             {
                 EngineText.Text = result.EngineName;
@@ -410,20 +754,11 @@ public partial class MainWindow : Window
                     SavePathText.Text = result.SavedFilePath;
                 }
 
-                // 클립보드에 복사
-                try
-                {
-                    System.Windows.Clipboard.SetImage(ConvertToBitmapSource(result.Image));
-                    CopyOverlay.Visibility = Visibility.Visible;
-                    StatusText.Text = "클립보드에 복사됨";
+                CopyToClipboard(result);
+                CopyOverlay.Visibility = Visibility.Visible;
 
-                    await Task.Delay(800);
-                    CopyOverlay.Visibility = Visibility.Collapsed;
-                }
-                catch (Exception ex)
-                {
-                    StatusText.Text = $"복사 실패: {ex.Message}";
-                }
+                await Task.Delay(800);
+                CopyOverlay.Visibility = Visibility.Collapsed;
             }
         }
     }
@@ -468,7 +803,6 @@ public partial class MainWindow : Window
 
     private void OnCaptureCompleted(object? sender, CaptureResult result)
     {
-        // 캡처 완료 후 추가 처리
     }
 
     private void OnStatusChanged(object? sender, string status)
@@ -486,9 +820,18 @@ public partial class MainWindow : Window
         SafeExecuteAsync(CaptureRegionAsync);
     }
 
+    private void CaptureWindow_Click(object sender, RoutedEventArgs e)
+    {
+        SafeExecuteAsync(CaptureWindowAsync);
+    }
+
+    private void CaptureScroll_Click(object sender, RoutedEventArgs e)
+    {
+        SafeExecuteAsync(CaptureScrollAsync);
+    }
+
     private void MonitorSelectButton_Click(object sender, RoutedEventArgs e)
     {
-        // 모니터 컨텍스트 메뉴 생성 및 표시
         var contextMenu = new System.Windows.Controls.ContextMenu();
         var monitors = DpiHelper.GetAllMonitors();
 
@@ -522,8 +865,15 @@ public partial class MainWindow : Window
             _settings.Save();
             UpdateSavePathDisplay();
 
-            // 단축키 비활성화
-            // RegisterHotkeys();
+            // 단축키 설정 변경 시 재등록
+            if (_settings.EnableGlobalHotkeys && !_hotkeyService.IsRegistered)
+            {
+                _hotkeyService.RegisterHotkeys();
+            }
+            else if (!_settings.EnableGlobalHotkeys && _hotkeyService.IsRegistered)
+            {
+                _hotkeyService.UnregisterHotkeys();
+            }
         }
     }
 
@@ -552,10 +902,8 @@ public partial class MainWindow : Window
     {
         var monitors = DpiHelper.GetAllMonitors();
 
-        // 메인 버튼 힌트 텍스트 업데이트
         MonitorSelectHint.Text = $"{monitors.Count}개 모니터";
 
-        // 트레이 메뉴에 서브메뉴 추가
         TrayMonitorMenu.Items.Clear();
         foreach (var monitor in monitors)
         {
@@ -581,10 +929,9 @@ public partial class MainWindow : Window
     {
         StatusText.Text = $"모니터 {monitorIndex + 1} 캡처 중...";
 
-        // 창을 잠시 숨김
         var wasVisible = IsVisible;
         if (wasVisible) Hide();
-        await Task.Delay(300); // 창이 완전히 숨겨질 때까지 대기 (잔상 방지)
+        await Task.Delay(200);
 
         var result = await _captureManager.CaptureMonitorAsync(monitorIndex);
 
@@ -617,6 +964,15 @@ public partial class MainWindow : Window
         SafeExecuteAsync(CaptureRegionAsync);
     }
 
+    private void TrayMenu_Window_Click(object sender, RoutedEventArgs e)
+    {
+        SafeExecuteAsync(CaptureWindowAsync);
+    }
+
+    private void TrayMenu_Scroll_Click(object sender, RoutedEventArgs e)
+    {
+        SafeExecuteAsync(CaptureScrollAsync);
+    }
 
     private void TrayMenu_Show_Click(object sender, RoutedEventArgs e)
     {
@@ -640,8 +996,6 @@ public partial class MainWindow : Window
         Show();
         WindowState = WindowState.Normal;
         Activate();
-
-        // WPF 렌더링 강제 갱신 (흰색 화면 방지)
         InvalidateVisual();
         UpdateLayout();
     }
@@ -668,6 +1022,7 @@ public partial class MainWindow : Window
         }
 
         // 리소스 정리
+        _hotkeyService.Dispose();
         _captureManager.Dispose();
         foreach (var capture in _captureHistory)
         {

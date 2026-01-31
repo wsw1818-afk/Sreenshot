@@ -132,7 +132,7 @@ public partial class CaptureOverlay : Window
         SelectionBorder.Width = 0;
         SelectionBorder.Height = 0;
 
-        CaptureMouse();
+        // CaptureMouse() 제거 - 마우스 이동을 부드럽게 하기 위해
     }
 
     private void Window_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
@@ -166,7 +166,6 @@ public partial class CaptureOverlay : Window
     {
         if (!_isSelecting) return;
 
-        ReleaseMouseCapture();
         _isSelecting = false;
 
         _currentPoint = e.GetPosition(this);
@@ -183,11 +182,14 @@ public partial class CaptureOverlay : Window
             return;
         }
 
-        int physicalX = _screenX + (int)x;
-        int physicalY = _screenY + (int)y;
+        // 반올림으로 정확한 영역 캡처
+        int physicalX = _screenX + (int)Math.Round(x);
+        int physicalY = _screenY + (int)Math.Round(y);
+        int physicalWidth = (int)Math.Round(width);
+        int physicalHeight = (int)Math.Round(height);
 
-        _selectedRegion = new Rectangle(physicalX, physicalY, (int)width, (int)height);
-        _imageRegion = new Rectangle((int)x, (int)y, (int)width, (int)height);
+        _selectedRegion = new Rectangle(physicalX, physicalY, physicalWidth, physicalHeight);
+        _imageRegion = new Rectangle((int)Math.Round(x), (int)Math.Round(y), physicalWidth, physicalHeight);
 
         DialogResult = true;
         Close();

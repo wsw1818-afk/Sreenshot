@@ -111,45 +111,67 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Column="0" Style="{StaticResource CaptureButton}"
                             Click="CaptureFullScreen_Click" Margin="5">
                         <StackPanel>
-                            <TextBlock Text="🖥️" FontSize="28" HorizontalAlignment="Center"/>
-                            <TextBlock Text="전체 화면" Margin="0,8,0,0" HorizontalAlignment="Center"/>
-                            <TextBlock Text="PrtSc" FontSize="10" Foreground="#888888"
-                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                            <TextBlock Text="🖥️" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="전체 화면" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock Text="PrtSc" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Button>
 
                     <Button Grid.Column="1" Style="{StaticResource CaptureButton}"
                             Click="CaptureRegion_Click" Margin="5">
                         <StackPanel>
-                            <TextBlock Text="✂️" FontSize="28" HorizontalAlignment="Center"/>
-                            <TextBlock Text="영역 선택" Margin="0,8,0,0" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Ctrl+Shift+S" FontSize="10" Foreground="#888888"
-                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                            <TextBlock Text="✂️" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="영역 선택" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+S" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Button>
 
-                    <Button x:Name="MonitorSelectButton" Grid.Column="2" Style="{StaticResource CaptureButton}"
-                            Click="MonitorSelectButton_Click" Margin="5">
+                    <Button Grid.Column="2" Style="{StaticResource CaptureButton}"
+                            Click="CaptureWindow_Click" Margin="5">
                         <StackPanel>
-                            <TextBlock Text="🖥️" FontSize="28" HorizontalAlignment="Center"/>
-                            <TextBlock Text="모니터 선택" Margin="0,8,0,0" HorizontalAlignment="Center"/>
-                            <TextBlock x:Name="MonitorSelectHint" Text="1개 모니터" FontSize="10" Foreground="#888888"
-                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                            <TextBlock Text="🪟" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="창 캡처" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+W" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Button>
 
                     <Button Grid.Column="3" Style="{StaticResource CaptureButton}"
+                            Click="CaptureScroll_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="📜" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="스크롤 캡처" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+A" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button x:Name="MonitorSelectButton" Grid.Column="4" Style="{StaticResource CaptureButton}"
+                            Click="MonitorSelectButton_Click" Margin="5">
+                        <StackPanel>
+                            <TextBlock Text="🖥️" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="모니터" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="MonitorSelectHint" Text="1개" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Grid.Column="5" Style="{StaticResource CaptureButton}"
                             Click="CaptureDelayed_Click" Margin="5">
                         <StackPanel>
-                            <TextBlock Text="⏱️" FontSize="28" HorizontalAlignment="Center"/>
-                            <TextBlock Text="지연 캡처" Margin="0,8,0,0" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Ctrl+Shift+D" FontSize="10" Foreground="#888888"
-                                       HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                            <TextBlock Text="⏱️" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock Text="지연 캡처" Margin="0,5,0,0" FontSize="12" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Ctrl+Shift+D" FontSize="9" Foreground="#888888"
+                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Button>
                 </Grid>
@@ -236,6 +258,8 @@
                 <ContextMenu>
                     <MenuItem Header="전체 화면 캡처" Click="TrayMenu_FullScreen_Click"/>
                     <MenuItem Header="영역 선택 캡처" Click="TrayMenu_Region_Click"/>
+                    <MenuItem Header="창 캡처" Click="TrayMenu_Window_Click"/>
+                    <MenuItem Header="스크롤 캡처" Click="TrayMenu_Scroll_Click"/>
                     <MenuItem x:Name="TrayMonitorMenu" Header="모니터 선택 캡처"/>
                     <Separator/>
                     <MenuItem Header="창 열기" Click="TrayMenu_Show_Click"/>

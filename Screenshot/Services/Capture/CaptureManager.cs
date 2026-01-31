@@ -22,15 +22,11 @@ public class CaptureManager : IDisposable
     {
         _settings = settings;
 
-        // 캡처 엔진 등록 (DXGI 우선, GDI 폴백)
+        // GDI 캡처 엔진 사용
         _engines = new List<ICaptureEngine>
         {
-            new DxgiCapture(),  // Priority 2 - DXGI Desktop Duplication (GPU 가속)
-            new GdiCapture()    // Priority 4 - 기본 GDI (CopyFromScreen)
+            new GdiCapture()
         };
-
-        // 우선순위로 정렬
-        _engines.Sort((a, b) => a.Priority.CompareTo(b.Priority));
     }
 
     /// <summary>
