@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -15,9 +16,20 @@ namespace Screenshot.Views;
 /// </summary>
 public partial class CaptureOverlay : Window
 {
-    // 물리적 좌표로 시작점과 현재점 저장
-    private System.Windows.Point _startPoint;
-    private System.Windows.Point _currentPoint;
+    // DPI 관련 Win32 API
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    // 물리적 좌표로 시작점과 현재점 저장 (물리적 픽셀)
+    private System.Drawing.Point _startPointPhysical;
+    private System.Drawing.Point _currentPointPhysical;
     private bool _isSelecting;
     private Rectangle _selectedRegion;
 
@@ -35,6 +47,9 @@ public partial class CaptureOverlay : Window
 
     // 십자선 길이
     private const double CrosshairLength = 20;
+
+    // DPI 스케일
+    private double _dpiScale = 1.0;
 
     public Rectangle SelectedRegion => _selectedRegion;
     public Rectangle ImageRegion => _imageRegion;
@@ -72,11 +87,31 @@ public partial class CaptureOverlay : Window
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
+
+        // DPI 스케일 계산
+        Loaded += (s, e) =>
+        {
+            var source = PresentationSource.FromVisual(this);
+            if (source?.CompositionTarget != null)
+            {
+                _dpiScale = source.CompositionTarget.TransformToDevice.M11;
+            }
+        };
+    }
+
+    /// <summary>
+    /// 물리적 마우스 좌표 가져오기 (DPI 스케일 영향 없음)
+    /// </summary>
+    private System.Drawing.Point GetPhysicalMousePosition()
+    {
+        GetCursorPos(out POINT pt);
+        return new System.Drawing.Point(pt.X - _screenX, pt.Y - _screenY);
     }
 
     private void UpdateCrosshair(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        var pos = e.GetPosition(this);
+        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
+        var pos = GetPhysicalMousePosition();
         double x = pos.X;
         double y = pos.Y;
 
@@ -160,7 +195,8 @@ public partial class CaptureOverlay : Window
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _startPoint = e.GetPosition(this);
+        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
+        _startPointPhysical = GetPhysicalMousePosition();
         _isSelecting = true;
 
         HelpPanel.Visibility = Visibility.Collapsed;
@@ -168,31 +204,30 @@ public partial class CaptureOverlay : Window
         SelectionBorder.Visibility = Visibility.Visible;
         SizeLabel.Visibility = Visibility.Visible;
 
-        Canvas.SetLeft(SelectionBorder, _startPoint.X);
-        Canvas.SetTop(SelectionBorder, _startPoint.Y);
+        Canvas.SetLeft(SelectionBorder, _startPointPhysical.X);
+        Canvas.SetTop(SelectionBorder, _startPointPhysical.Y);
         SelectionBorder.Width = 0;
         SelectionBorder.Height = 0;
-
-        // CaptureMouse() 제거 - 마우스 이동을 부드럽게 하기 위해
     }
 
     private void Window_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (!_isSelecting) return;
 
-        _currentPoint = e.GetPosition(this);
+        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
+        _currentPointPhysical = GetPhysicalMousePosition();
 
-        double x = Math.Min(_startPoint.X, _currentPoint.X);
-        double y = Math.Min(_startPoint.Y, _currentPoint.Y);
-        double width = Math.Abs(_currentPoint.X - _startPoint.X);
-        double height = Math.Abs(_currentPoint.Y - _startPoint.Y);
+        int x = Math.Min(_startPointPhysical.X, _currentPointPhysical.X);
+        int y = Math.Min(_startPointPhysical.Y, _currentPointPhysical.Y);
+        int width = Math.Abs(_currentPointPhysical.X - _startPointPhysical.X);
+        int height = Math.Abs(_currentPointPhysical.Y - _startPointPhysical.Y);
 
         Canvas.SetLeft(SelectionBorder, x);
         Canvas.SetTop(SelectionBorder, y);
         SelectionBorder.Width = width;
         SelectionBorder.Height = height;
 
-        SizeText.Text = $"{(int)width} x {(int)height}";
+        SizeText.Text = $"{width} x {height}";
 
         var labelTop = y - 30;
         if (labelTop < 0) labelTop = y + height + 5;
@@ -209,12 +244,13 @@ public partial class CaptureOverlay : Window
 
         _isSelecting = false;
 
-        _currentPoint = e.GetPosition(this);
+        // 물리적 마우스 좌표 사용 (DPI 스케일 영향 없음)
+        _currentPointPhysical = GetPhysicalMousePosition();
 
-        double x = Math.Min(_startPoint.X, _currentPoint.X);
-        double y = Math.Min(_startPoint.Y, _currentPoint.Y);
-        double width = Math.Abs(_currentPoint.X - _startPoint.X);
-        double height = Math.Abs(_currentPoint.Y - _startPoint.Y);
+        int x = Math.Min(_startPointPhysical.X, _currentPointPhysical.X);
+        int y = Math.Min(_startPointPhysical.Y, _currentPointPhysical.Y);
+        int width = Math.Abs(_currentPointPhysical.X - _startPointPhysical.X);
+        int height = Math.Abs(_currentPointPhysical.Y - _startPointPhysical.Y);
 
         if (width < 10 || height < 10)
         {
@@ -223,14 +259,9 @@ public partial class CaptureOverlay : Window
             return;
         }
 
-        // 반올림으로 정확한 영역 캡처
-        int physicalX = _screenX + (int)Math.Round(x);
-        int physicalY = _screenY + (int)Math.Round(y);
-        int physicalWidth = (int)Math.Round(width);
-        int physicalHeight = (int)Math.Round(height);
-
-        _selectedRegion = new Rectangle(physicalX, physicalY, physicalWidth, physicalHeight);
-        _imageRegion = new Rectangle((int)Math.Round(x), (int)Math.Round(y), physicalWidth, physicalHeight);
+        // 물리적 좌표 그대로 사용
+        _selectedRegion = new Rectangle(_screenX + x, _screenY + y, width, height);
+        _imageRegion = new Rectangle(x, y, width, height);
 
         DialogResult = true;
         Close();
