@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -22,11 +23,50 @@ public class CaptureManager : IDisposable
     {
         _settings = settings;
 
-        // GDI 캡처 엔진 사용
-        _engines = new List<ICaptureEngine>
+        // 캡처 엔진 우선순위: WinRT > DXGI > GDI (Fallback)
+        // WinRT: Windows 10 1903+ 하드웨어 가속, DLP 후킹 우회, 테두리 없음
+        // DXGI: 하드웨어 레벨 직접 접근, DRM 우회 가능
+        // GDI: 레거시 Fallback (모든 Windows 지원)
+        _engines = new List<ICaptureEngine>();
+        
+        // 1. WinRT 캡처 (최신 Windows, 최우선)
+        try
         {
-            new GdiCapture()
-        };
+            var winRtCapture = new WinRtCapture();
+            if (winRtCapture.IsAvailable)
+            {
+                _engines.Add(winRtCapture);
+                System.Diagnostics.Debug.WriteLine("WinRT 캡처 엔진 등록됨");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"WinRT 캡처 초기화 실패: {ex.Message}");
+        }
+        
+        // 2. DXGI 캡처 (하드웨어 레벨)
+        try
+        {
+            var dxgiCapture = new DxgiCapture();
+            if (dxgiCapture.IsAvailable)
+            {
+                _engines.Add(dxgiCapture);
+                System.Diagnostics.Debug.WriteLine("DXGI 캡처 엔진 등록됨");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"DXGI 캡처 초기화 실패: {ex.Message}");
+        }
+        
+        // 3. GDI 캡처 (Fallback, 항상 추가)
+        _engines.Add(new GdiCapture());
+        System.Diagnostics.Debug.WriteLine("GDI 캡처 엔진 등록됨");
+        
+        // 우선순위에 따라 정렬 (낮은 값이 높은 우선순위)
+        _engines = _engines.OrderBy(e => e.Priority).ToList();
+        
+        System.Diagnostics.Debug.WriteLine($"등록된 캡처 엔진: {string.Join(", ", _engines.Select(e => $"{e.Name}(P{e.Priority})"))}");
     }
 
     /// <summary>

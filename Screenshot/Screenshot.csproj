@@ -15,6 +15,10 @@
     <!-- Per-Monitor DPI Awareness V2 -->
     <WindowsPackageType>None</WindowsPackageType>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    
+    <!-- WinRT 캡처용 설정 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CsWinRTWindowsMetadata>10.0.19041.0</CsWinRTWindowsMetadata>
 
     <!-- 배포 설정 -->
     <PublishSingleFile>true</PublishSingleFile>
@@ -28,6 +32,13 @@
 
     <!-- JSON 설정 저장 -->
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    
+    <!-- WinRT 캡처용 -->
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.0.8" />
+    
+    <!-- DirectX 캡처용 -->
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
   </ItemGroup>
 
 </Project>
