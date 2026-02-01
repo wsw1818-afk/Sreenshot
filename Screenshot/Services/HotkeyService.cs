@@ -59,25 +59,45 @@ public class HotkeyService : IDisposable
     {
         if (_windowHandle == IntPtr.Zero) return false;
 
+        var registeredKeys = new List<int>();
+
         try
         {
             // PrintScreen - 전체 화면 캡처
-            RegisterHotKey(_windowHandle, HOTKEY_FULLSCREEN, MOD_NONE, VK_SNAPSHOT);
+            if (RegisterHotKey(_windowHandle, HOTKEY_FULLSCREEN, MOD_NONE, VK_SNAPSHOT))
+            {
+                registeredKeys.Add(HOTKEY_FULLSCREEN);
+            }
 
             // Ctrl+Shift+S - 영역 선택 캡처
-            RegisterHotKey(_windowHandle, HOTKEY_REGION, MOD_CONTROL | MOD_SHIFT, VK_S);
+            if (RegisterHotKey(_windowHandle, HOTKEY_REGION, MOD_CONTROL | MOD_SHIFT, VK_S))
+            {
+                registeredKeys.Add(HOTKEY_REGION);
+            }
 
             // Ctrl+Shift+D - 지연 캡처
-            RegisterHotKey(_windowHandle, HOTKEY_DELAYED, MOD_CONTROL | MOD_SHIFT, VK_D);
+            if (RegisterHotKey(_windowHandle, HOTKEY_DELAYED, MOD_CONTROL | MOD_SHIFT, VK_D))
+            {
+                registeredKeys.Add(HOTKEY_DELAYED);
+            }
 
             // Ctrl+Shift+W - 창 캡처
-            RegisterHotKey(_windowHandle, HOTKEY_WINDOW, MOD_CONTROL | MOD_SHIFT, VK_W);
+            if (RegisterHotKey(_windowHandle, HOTKEY_WINDOW, MOD_CONTROL | MOD_SHIFT, VK_W))
+            {
+                registeredKeys.Add(HOTKEY_WINDOW);
+            }
 
-            _isRegistered = true;
-            return true;
+            // 모든 핫키가 등록되었는지 확인
+            _isRegistered = registeredKeys.Count == 4;
+            return _isRegistered;
         }
         catch
         {
+            // 예외 발생 시 이미 등록된 핫키 해제
+            foreach (var keyId in registeredKeys)
+            {
+                UnregisterHotKey(_windowHandle, keyId);
+            }
             _isRegistered = false;
             return false;
         }

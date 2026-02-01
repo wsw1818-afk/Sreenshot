@@ -174,22 +174,24 @@ public partial class MainWindow : Window
                 var cropWidth = Math.Min(imageRegion.Width, overlay.CapturedScreen.Width - cropX);
                 var cropHeight = Math.Min(imageRegion.Height, overlay.CapturedScreen.Height - cropY);
 
-                var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
-                var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
-
-                var result = new CaptureResult
+                // 유효한 크기인지 확인
+                if (cropWidth > 0 && cropHeight > 0)
                 {
-                    Success = true,
-                    Image = croppedImage,
-                    EngineName = "RegionCapture"
-                };
-                HandleCaptureResult(result);
-                overlay.CapturedScreen.Dispose();
+                    var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
+                    var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
+
+                    var result = new CaptureResult
+                    {
+                        Success = true,
+                        Image = croppedImage,
+                        EngineName = "RegionCapture"
+                    };
+                    HandleCaptureResult(result);
+                }
             }
-            else
-            {
-                overlay.CapturedScreen?.Dispose();
-            }
+
+            // CapturedScreen은 항상 Dispose (null-safe)
+            overlay.CapturedScreen?.Dispose();
 
             Show();
             InvalidateVisual();
@@ -506,7 +508,13 @@ public partial class MainWindow : Window
 
     private void AddThumbnail(CaptureResult result)
     {
-        var bitmapSource = ConvertToBitmapSource(result.Image!);
+        // null 체크
+        if (result.Image == null)
+        {
+            return;
+        }
+
+        var bitmapSource = ConvertToBitmapSource(result.Image);
 
         var border = new System.Windows.Controls.Border
         {
@@ -517,7 +525,7 @@ public partial class MainWindow : Window
             Margin = new Thickness(5),
             Padding = new Thickness(5),
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = $"좌클릭: 클립보드 복사\n우클릭: 더 많은 옵션\n{result.Image!.Width} x {result.Image.Height}\n{result.EngineName}",
+            ToolTip = $"좌클릭: 클립보드 복사\n우클릭: 더 많은 옵션\n{result.Image.Width} x {result.Image.Height}\n{result.EngineName}",
             Tag = result,
             VerticalAlignment = VerticalAlignment.Center,
             Height = 120

@@ -419,10 +419,18 @@ public class ScrollCaptureService
         int totalHeight = images[0].Height;
         for (int i = 1; i < images.Count; i++)
         {
-            // 겹치는 부분 찾기
+            // 겹치는 부분 찾기 (이미지 높이를 초과하지 않도록 제한)
             int actualOverlap = FindOverlap(images[i - 1], images[i], overlap);
-            totalHeight += images[i].Height - actualOverlap;
+            actualOverlap = Math.Min(actualOverlap, images[i].Height - 1);
+            int addedHeight = images[i].Height - actualOverlap;
+            if (addedHeight > 0)
+            {
+                totalHeight += addedHeight;
+            }
         }
+
+        // 최소 높이 보장
+        totalHeight = Math.Max(totalHeight, 1);
 
         var result = new Bitmap(width, totalHeight, PixelFormat.Format32bppArgb);
 
@@ -440,7 +448,9 @@ public class ScrollCaptureService
             for (int i = 1; i < images.Count; i++)
             {
                 int actualOverlap = FindOverlap(images[i - 1], images[i], overlap);
+                actualOverlap = Math.Min(actualOverlap, images[i].Height - 1);
                 currentY -= actualOverlap;
+                currentY = Math.Max(currentY, 0); // 음수 방지
                 g.DrawImage(images[i], 0, currentY);
                 currentY += images[i].Height;
             }
@@ -454,6 +464,12 @@ public class ScrollCaptureService
     /// </summary>
     private int FindOverlap(Bitmap upper, Bitmap lower, int maxOverlap)
     {
+        // 경계 검사: 이미지가 너무 작으면 기본값 반환
+        if (upper.Height < 20 || lower.Height < 20)
+        {
+            return Math.Min(maxOverlap / 2, Math.Min(upper.Height, lower.Height) - 1);
+        }
+
         int width = Math.Min(upper.Width, lower.Width);
         int searchHeight = Math.Min(maxOverlap, Math.Min(upper.Height, lower.Height) / 2);
 
@@ -466,7 +482,7 @@ public class ScrollCaptureService
             }
         }
 
-        return maxOverlap / 2; // 기본값
+        return Math.Min(maxOverlap / 2, Math.Min(upper.Height, lower.Height) - 1); // 기본값 (경계 보호)
     }
 
     /// <summary>
@@ -474,17 +490,43 @@ public class ScrollCaptureService
     /// </summary>
     private bool CompareRegions(Bitmap upper, Bitmap lower, int overlap)
     {
+        // 경계 검사: overlap이 이미지 높이를 초과하면 false
+        if (overlap <= 0 || overlap > upper.Height || overlap > lower.Height)
+        {
+            return false;
+        }
+
         int width = Math.Min(upper.Width, lower.Width);
         int upperStartY = upper.Height - overlap;
+
+        // upperStartY가 음수면 false
+        if (upperStartY < 0)
+        {
+            return false;
+        }
+
         int matchCount = 0;
         int totalSamples = 0;
 
         // 샘플링하여 비교
         for (int y = 0; y < overlap; y += 5)
         {
+            int upperY = upperStartY + y;
+            // 경계 검사
+            if (upperY >= upper.Height || y >= lower.Height)
+            {
+                break;
+            }
+
             for (int x = 0; x < width; x += 10)
             {
-                var upperPixel = upper.GetPixel(x, upperStartY + y);
+                // 경계 검사
+                if (x >= upper.Width || x >= lower.Width)
+                {
+                    break;
+                }
+
+                var upperPixel = upper.GetPixel(x, upperY);
                 var lowerPixel = lower.GetPixel(x, y);
 
                 totalSamples++;

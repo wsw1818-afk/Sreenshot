@@ -206,15 +206,20 @@ public class ChromeCaptureService
                 // 특정 URL을 가진 탭을 찾기
                 if (!string.IsNullOrEmpty(targetUrl))
                 {
+                    var targetUrlBase = targetUrl.Split('?')[0].Split('#')[0];
                     foreach (var tab in tabs)
                     {
                         if (tab.TryGetProperty("type", out var type) &&
                             type.GetString() == "page" &&
-                            tab.TryGetProperty("url", out var tabUrl) &&
-                            tabUrl.GetString()!.Contains(targetUrl.Split('?')[0].Split('#')[0]) &&
-                            tab.TryGetProperty("webSocketDebuggerUrl", out var wsUrl))
+                            tab.TryGetProperty("url", out var tabUrl))
                         {
-                            return wsUrl.GetString();
+                            var tabUrlString = tabUrl.GetString();
+                            if (!string.IsNullOrEmpty(tabUrlString) &&
+                                tabUrlString.Contains(targetUrlBase) &&
+                                tab.TryGetProperty("webSocketDebuggerUrl", out var wsUrl))
+                            {
+                                return wsUrl.GetString();
+                            }
                         }
                     }
                 }
