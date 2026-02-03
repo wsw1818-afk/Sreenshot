@@ -16,7 +16,7 @@
 
     <Grid>
         <!-- 캡처된 화면 배경 -->
-        <Image x:Name="BackgroundImage" Stretch="UniformToFill" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+        <Image x:Name="BackgroundImage" Stretch="Fill" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
 
         <!-- 어두운 오버레이 (선택 영역 제외) - 초기에는 숨김 -->
         <Rectangle x:Name="DimOverlay" Fill="#80000000" Visibility="Collapsed"/>

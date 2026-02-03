@@ -210,6 +210,11 @@ public partial class MainWindow : Window
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureScreen 완료, Overlay 생성 중...");
             System.Diagnostics.Debug.WriteLine("[RegionCapture] CaptureOverlay 생성 중...");
 
+            // 오버레이 표시 전에 MainWindow 위치/투명도 복원 (오버레이와 충돌 방지)
+            Left = originalLeft;
+            Top = originalTop;
+            Opacity = originalOpacity;
+
             CaptureOverlay overlay;
             try
             {

@@ -86,17 +86,20 @@ public partial class CaptureOverlay : Window
         _wpfScreenWidth = _screenWidth / _dpiScale;
         _wpfScreenHeight = _screenHeight / _dpiScale;
 
-        // 배경 이미지 설정 - DIP 크기로 설정 (렌더링시 물리적 픽셀로 변환됨)
+        // 배경 이미지 설정
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 시작: {_capturedScreen.Width}x{_capturedScreen.Height}");
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 완료: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}");
+        
         BackgroundImage.Source = bitmapSource;
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
-        BackgroundImage.Stretch = Stretch.Fill;  // 비트맵을 꽉 채우기
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"BackgroundImage 설정 완료: {BackgroundImage.Width}x{BackgroundImage.Height}");
 
-        // 창 설정 - 주 모니터 기준으로 설정 (모든 모니터 커버)
+        // 창 설정 - 가상 화면 전체를 덮도록 설정 (멀티모니터 지원)
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = 0;
-        Top = 0;
+        Left = _screenX / _dpiScale;
+        Top = _screenY / _dpiScale;
         Width = _wpfScreenWidth;
         Height = _wpfScreenHeight;
         
@@ -258,7 +261,7 @@ public partial class CaptureOverlay : Window
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
         // MemoryStream 방식 - 가장 안정적
-        using var ms = new MemoryStream();
+        var ms = new MemoryStream();
         bitmap.Save(ms, ImageFormat.Png);
         ms.Position = 0;
 
@@ -266,8 +269,14 @@ public partial class CaptureOverlay : Window
         bitmapImage.BeginInit();
         bitmapImage.StreamSource = ms;
         bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+        bitmapImage.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
         bitmapImage.EndInit();
+        
+        // 로드 완료 대기
         bitmapImage.Freeze();
+        
+        // 스트림은 Freeze 후에 닫음
+        ms.Dispose();
         
         return bitmapImage;
     }
