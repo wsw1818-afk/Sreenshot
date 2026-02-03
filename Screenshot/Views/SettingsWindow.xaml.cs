@@ -363,4 +363,9 @@ public partial class SettingsWindow : Window
     }
 
     #endregion
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        Services.Capture.CaptureLogger.OpenLogFolder();
+    }
 }

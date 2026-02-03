@@ -2,14 +2,11 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Threading;
 using Screenshot.Models;
 
 namespace Screenshot.Services.Capture;
 
-/// <summary>
-/// 캡처 엔진 관리자
-/// 여러 캡처 엔진을 우선순위에 따라 시도하고 Fallback 처리
-/// </summary>
 public class CaptureManager : IDisposable
 {
     private readonly List<ICaptureEngine> _engines;
@@ -22,205 +19,295 @@ public class CaptureManager : IDisposable
     public CaptureManager(AppSettings settings)
     {
         _settings = settings;
+        CaptureLogger.Info("Init", "=== CaptureManager 초기화 ===");
+        CaptureLogger.LogDiagnostics();
 
-        // 캡처 엔진 우선순위: WinRT > DXGI > GDI (Fallback)
-        // WinRT: Windows 10 1903+ 하드웨어 가속, DLP 후킹 우회, 테두리 없음
-        // DXGI: 하드웨어 레벨 직접 접근, DRM 우회 가능
-        // GDI: 레거시 Fallback (모든 Windows 지원)
         _engines = new List<ICaptureEngine>();
         
-        // 1. WinRT 캡처 (최신 Windows, 최우선)
-        try
-        {
-            var winRtCapture = new WinRtCapture();
-            if (winRtCapture.IsAvailable)
-            {
-                _engines.Add(winRtCapture);
-                System.Diagnostics.Debug.WriteLine("WinRT 캡처 엔진 등록됨");
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"WinRT 캡처 초기화 실패: {ex.Message}");
-        }
-        
-        // 2. DXGI 캡처 (하드웨어 레벨)
+        // 1. DXGI 캡처 (최우선)
         try
         {
             var dxgiCapture = new DxgiCapture();
+            CaptureLogger.LogEngineInit("DXGI", dxgiCapture.IsAvailable);
+            
             if (dxgiCapture.IsAvailable)
             {
                 _engines.Add(dxgiCapture);
-                System.Diagnostics.Debug.WriteLine("DXGI 캡처 엔진 등록됨");
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"DXGI 캡처 초기화 실패: {ex.Message}");
+            CaptureLogger.Error("Init", "DXGI 초기화 실패", ex);
         }
         
-        // 3. GDI 캡처 (Fallback, 항상 추가)
+        // 2. GDI 캡처 (Fallback)
         _engines.Add(new GdiCapture());
-        System.Diagnostics.Debug.WriteLine("GDI 캡처 엔진 등록됨");
+        CaptureLogger.LogEngineInit("GDI", true, "Fallback");
         
-        // 우선순위에 따라 정렬 (낮은 값이 높은 우선순위)
-        _engines = _engines.OrderBy(e => e.Priority).ToList();
+        // WinRT는 COM 마샬링 문제로 일단 제외
+        CaptureLogger.Info("Init", "WinRT 비활성화 (COM 마샬링 문제)");
         
-        System.Diagnostics.Debug.WriteLine($"등록된 캡처 엔진: {string.Join(", ", _engines.Select(e => $"{e.Name}(P{e.Priority})"))}");
+        CaptureLogger.Info("Init", $"엔진: {string.Join(", ", _engines.Select(e => $"{e.Name}(P{e.Priority})"))}");
+        CaptureLogger.Info("Init", "=== 초기화 완료 ===");
     }
 
-    /// <summary>
-    /// 사용 가능한 엔진 목록
-    /// </summary>
     public IReadOnlyList<ICaptureEngine> AvailableEngines =>
         _engines.Where(e => e.IsAvailable).ToList().AsReadOnly();
 
-    /// <summary>
-    /// 마지막으로 성공한 엔진
-    /// </summary>
     public ICaptureEngine? LastSuccessfulEngine => _lastSuccessfulEngine;
 
-    /// <summary>
-    /// 전체 화면 캡처
-    /// </summary>
     public async Task<CaptureResult> CaptureFullScreenAsync()
     {
-        return await Task.Run(() => ExecuteWithFallback(e => e.CaptureFullScreen()));
+        CaptureLogger.Info("Capture", "=== 전체 화면 캡처 ===");
+        return await Task.Run(() => ExecuteCapture(e => e.CaptureFullScreen(), "FullScreen"));
     }
 
-    /// <summary>
-    /// 특정 모니터 캡처
-    /// </summary>
     public async Task<CaptureResult> CaptureMonitorAsync(int monitorIndex)
     {
-        return await Task.Run(() => ExecuteWithFallback(e => e.CaptureMonitor(monitorIndex)));
+        CaptureLogger.Info("Capture", $"=== 모니터 {monitorIndex} ===");
+        return await Task.Run(() => ExecuteCapture(e => e.CaptureMonitor(monitorIndex), $"Monitor({monitorIndex})"));
     }
 
-    /// <summary>
-    /// 영역 캡처
-    /// </summary>
     public async Task<CaptureResult> CaptureRegionAsync(Rectangle region)
     {
-        return await Task.Run(() => ExecuteWithFallback(e => e.CaptureRegion(region)));
+        CaptureLogger.Info("Capture", $"=== 영역 캡처: {region} ===");
+        return await Task.Run(() => ExecuteCapture(e => e.CaptureRegion(region), "Region", region));
     }
 
-    /// <summary>
-    /// 활성 창 캡처
-    /// </summary>
     public async Task<CaptureResult> CaptureActiveWindowAsync()
     {
-        return await Task.Run(() => ExecuteWithFallback(e => e.CaptureActiveWindow()));
+        CaptureLogger.Info("Capture", "=== 활성 창 캡처 ===");
+        return await Task.Run(() => ExecuteCapture(e => e.CaptureActiveWindow(), "ActiveWindow"));
     }
 
     /// <summary>
-    /// Fallback 로직으로 캡처 실행
+    /// 특정 창 캡처 (WindowCaptureService 통합)
     /// </summary>
-    private CaptureResult ExecuteWithFallback(Func<ICaptureEngine, CaptureResult> captureFunc)
+    public async Task<CaptureResult> CaptureWindowAsync(IntPtr hWnd)
     {
-        // 마지막 성공 엔진이 있으면 먼저 시도
-        if (_lastSuccessfulEngine != null && _lastSuccessfulEngine.IsAvailable)
+        CaptureLogger.Info("Capture", $"=== 창 캡처: {hWnd} ===");
+        
+        return await Task.Run(() =>
         {
-            StatusChanged?.Invoke(this, $"{_lastSuccessfulEngine.Name}으로 캡처 시도 중...");
-            var result = captureFunc(_lastSuccessfulEngine);
-            if (result.Success)
+            // 1. 먼저 엔진들로 시도 (DXGI/GDI)
+            var result = ExecuteCapture(e => e.CaptureActiveWindow(), "Window");
+            if (result.Success && result.Image != null)
             {
-                ProcessCaptureResult(result);
                 return result;
             }
-        }
 
-        // 모든 엔진을 우선순위 순으로 시도
+            // 2. 엔진 실패시 WindowCaptureService 사용 (PrintWindow)
+            try
+            {
+                var windowService = new WindowCaptureService();
+                var bitmap = windowService.CaptureWindow(hWnd);
+                
+                if (bitmap != null && !IsBlackImage(bitmap))
+                {
+                    CaptureLogger.Info("Capture", "WindowCaptureService로 캡처 성공");
+                    return new CaptureResult
+                    {
+                        Success = true,
+                        Image = bitmap,
+                        EngineName = "PrintWindow",
+                        CapturedAt = DateTime.Now
+                    };
+                }
+                
+                bitmap?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", "WindowCaptureService 실패", ex);
+            }
+
+            return new CaptureResult
+            {
+                Success = false,
+                EngineName = "None",
+                ErrorMessage = "모든 창 캡처 방법 실패"
+            };
+        });
+    }
+
+    private CaptureResult ExecuteCapture(Func<ICaptureEngine, CaptureResult> captureFunc, string mode, Rectangle? region = null)
+    {
+        var sw = Stopwatch.StartNew();
         var errors = new List<string>();
 
+        // 마지막 성공 엔진 먼저 시도
+        if (_lastSuccessfulEngine != null)
+        {
+            CaptureLogger.Info("Capture", $"마지막 성공 엔진: {_lastSuccessfulEngine.Name}, IsAvailable={_lastSuccessfulEngine.IsAvailable}");
+            
+            if (_lastSuccessfulEngine.IsAvailable)
+            {
+                StatusChanged?.Invoke(this, $"{_lastSuccessfulEngine.Name}으로 캡처 중...");
+                CaptureLogger.LogCaptureAttempt(_lastSuccessfulEngine.Name, mode, region);
+                
+                try
+                {
+                    var result = captureFunc(_lastSuccessfulEngine);
+
+                    if (result.Success && result.Image != null && !IsBlackImage(result.Image))
+                    {
+                        sw.Stop();
+                        CaptureLogger.Info("Capture", $"성공 ({_lastSuccessfulEngine.Name}, {sw.ElapsedMilliseconds}ms)");
+                        ProcessCaptureResult(result);
+                        return result;
+                    }
+                    
+                    if (result.Image != null)
+                    {
+                        result.Image.Dispose();
+                        errors.Add($"{_lastSuccessfulEngine.Name}: 검은 화면");
+                    }
+                    else
+                    {
+                        errors.Add($"{_lastSuccessfulEngine.Name}: {result.ErrorMessage}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{_lastSuccessfulEngine.Name}: {ex.Message}");
+                    CaptureLogger.Error("Capture", $"[{_lastSuccessfulEngine.Name}] 예외", ex);
+                    // 예외 발생시 해당 엔진 초기화
+                    _lastSuccessfulEngine = null;
+                }
+            }
+            else
+            {
+                CaptureLogger.Warn("Capture", $"마지막 성공 엔진 {_lastSuccessfulEngine.Name}을 사용할 수 없음, 순회 모드로 전환");
+                _lastSuccessfulEngine = null; // 사용 불가하면 초기화
+            }
+        }
+        else
+        {
+            CaptureLogger.Info("Capture", "마지막 성공 엔진 없음, 모든 엔진 순회");
+        }
+
+        // 모든 엔진 순회
         foreach (var engine in _engines.Where(e => e.IsAvailable && e != _lastSuccessfulEngine))
         {
-            StatusChanged?.Invoke(this, $"{engine.Name}으로 캡처 시도 중...");
+            StatusChanged?.Invoke(this, $"{engine.Name}으로 캡처 중...");
+            CaptureLogger.LogCaptureAttempt(engine.Name, mode, region);
 
             try
             {
                 var result = captureFunc(engine);
 
-                if (result.Success)
+                if (result.Success && result.Image != null && !IsBlackImage(result.Image))
                 {
                     _lastSuccessfulEngine = engine;
+                    sw.Stop();
+                    CaptureLogger.Info("Capture", $"성공 ({engine.Name}, {sw.ElapsedMilliseconds}ms)");
                     ProcessCaptureResult(result);
-                    StatusChanged?.Invoke(this, $"캡처 성공 ({engine.Name})");
                     return result;
                 }
 
-                errors.Add($"{engine.Name}: {result.ErrorMessage}");
+                if (result.Image != null)
+                {
+                    result.Image.Dispose();
+                    errors.Add($"{engine.Name}: 검은 화면");
+                }
+                else
+                {
+                    errors.Add($"{engine.Name}: {result.ErrorMessage}");
+                }
             }
             catch (Exception ex)
             {
                 errors.Add($"{engine.Name}: {ex.Message}");
+                CaptureLogger.Error("Capture", $"[{engine.Name}] 예외", ex);
             }
         }
 
         // 모든 엔진 실패
-        StatusChanged?.Invoke(this, "모든 캡처 방법 실패");
+        sw.Stop();
+        StatusChanged?.Invoke(this, "캡처 실패");
+        var errorMsg = "모든 캡처 방법 실패:\n" + string.Join("\n", errors);
+        CaptureLogger.Error("Capture", $"실패 ({sw.ElapsedMilliseconds}ms): {errorMsg}");
+        
         return new CaptureResult
         {
             Success = false,
             EngineName = "None",
-            ErrorMessage = $"모든 캡처 방법 실패:\n{string.Join("\n", errors)}"
+            ErrorMessage = errorMsg
         };
     }
 
-    /// <summary>
-    /// 캡처 결과 처리 (저장, 클립보드 등)
-    /// </summary>
+    private bool IsBlackImage(Bitmap bitmap)
+    {
+        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
+
+        int sampleCount = Math.Min(20, Math.Max(5, bitmap.Width * bitmap.Height / 100));
+        int blackCount = 0;
+        var random = new Random();
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            int x = random.Next(bitmap.Width);
+            int y = random.Next(bitmap.Height);
+
+            try
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.R < 15 && pixel.G < 15 && pixel.B < 15)
+                    blackCount++;
+            }
+            catch { }
+        }
+
+        var ratio = (double)blackCount / sampleCount;
+        var isBlack = ratio >= 0.85;
+        
+        if (isBlack)
+        {
+            CaptureLogger.LogBlackImageDetection("Validator", sampleCount, blackCount, ratio);
+        }
+
+        return isBlack;
+    }
+
     private void ProcessCaptureResult(CaptureResult result)
     {
         if (!result.Success || result.Image == null) return;
 
         try
         {
-            // 클립보드에 복사
             if (_settings.CopyToClipboard)
             {
                 CopyToClipboard(result.Image);
             }
 
-            // 파일로 저장
             if (_settings.AutoSave)
             {
                 result.SavedFilePath = SaveToFile(result.Image);
             }
 
-            // 캡처 완료 이벤트 발생
             CaptureCompleted?.Invoke(this, result);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"캡처 후처리 실패: {ex.Message}");
+            CaptureLogger.Error("PostProcess", "후처리 실패", ex);
         }
     }
 
-    /// <summary>
-    /// 클립보드에 이미지 복사
-    /// </summary>
     private void CopyToClipboard(Bitmap image)
     {
         try
         {
-            // WPF 애플리케이션의 경우 STA 스레드에서 실행해야 함
-            if (System.Windows.Application.Current?.Dispatcher != null)
+            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
             {
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                {
-                    System.Windows.Clipboard.SetImage(ConvertToBitmapSource(image));
-                });
-            }
+                System.Windows.Clipboard.SetImage(ConvertToBitmapSource(image));
+            });
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"클립보드 복사 실패: {ex.Message}");
+            CaptureLogger.Error("Clipboard", "복사 실패", ex);
         }
     }
 
-    /// <summary>
-    /// Bitmap을 BitmapSource로 변환
-    /// </summary>
     private System.Windows.Media.Imaging.BitmapSource ConvertToBitmapSource(Bitmap bitmap)
     {
         var bitmapData = bitmap.LockBits(
@@ -239,7 +326,7 @@ public class CaptureManager : IDisposable
                 bitmapData.Stride * bitmap.Height,
                 bitmapData.Stride);
 
-            source.Freeze(); // 스레드 안전
+            source.Freeze();
             return source;
         }
         finally
@@ -248,12 +335,8 @@ public class CaptureManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// 파일로 저장
-    /// </summary>
     private string SaveToFile(Bitmap image)
     {
-        // 저장 폴더 확인/생성
         var saveFolder = _settings.SaveFolder;
         if (_settings.OrganizeByDate)
         {
@@ -265,7 +348,6 @@ public class CaptureManager : IDisposable
             Directory.CreateDirectory(saveFolder);
         }
 
-        // 파일명 생성
         var fileName = GenerateFileName();
         var extension = _settings.ImageFormat.ToLower() switch
         {
@@ -277,7 +359,6 @@ public class CaptureManager : IDisposable
 
         var filePath = Path.Combine(saveFolder, fileName + extension);
 
-        // 중복 파일명 처리
         int counter = 1;
         while (File.Exists(filePath))
         {
@@ -285,7 +366,6 @@ public class CaptureManager : IDisposable
             counter++;
         }
 
-        // 저장
         var format = _settings.ImageFormat.ToLower() switch
         {
             "jpg" or "jpeg" => ImageFormat.Jpeg,
@@ -295,7 +375,6 @@ public class CaptureManager : IDisposable
 
         if (format == ImageFormat.Jpeg)
         {
-            // JPEG 품질 설정
             var encoder = ImageCodecInfo.GetImageEncoders()
                 .First(c => c.FormatID == ImageFormat.Jpeg.Guid);
             var encoderParams = new EncoderParameters(1);
@@ -311,9 +390,6 @@ public class CaptureManager : IDisposable
         return filePath;
     }
 
-    /// <summary>
-    /// 파일명 생성
-    /// </summary>
     private string GenerateFileName()
     {
         var now = DateTime.Now;
@@ -323,39 +399,15 @@ public class CaptureManager : IDisposable
             .Replace("{datetime}", now.ToString("yyyy-MM-dd_HHmmss"));
     }
 
-    /// <summary>
-    /// 특정 엔진으로 직접 캡처 (테스트용)
-    /// </summary>
-    public CaptureResult CaptureWithEngine(string engineName, CaptureMode mode, Rectangle? region = null)
-    {
-        var engine = _engines.FirstOrDefault(e =>
-            e.Name.Equals(engineName, StringComparison.OrdinalIgnoreCase));
-
-        if (engine == null)
-        {
-            return new CaptureResult
-            {
-                Success = false,
-                ErrorMessage = $"엔진을 찾을 수 없습니다: {engineName}"
-            };
-        }
-
-        return mode switch
-        {
-            CaptureMode.FullScreen => engine.CaptureFullScreen(),
-            CaptureMode.Region when region.HasValue => engine.CaptureRegion(region.Value),
-            CaptureMode.ActiveWindow => engine.CaptureActiveWindow(),
-            _ => engine.CaptureFullScreen()
-        };
-    }
-
     public void Dispose()
     {
+        CaptureLogger.Info("Dispose", "리소스 정리");
         foreach (var engine in _engines)
         {
             engine.Dispose();
         }
         _engines.Clear();
+        CaptureLogger.FlushToFile();
         GC.SuppressFinalize(this);
     }
 }

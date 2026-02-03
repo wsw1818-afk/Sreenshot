@@ -10,7 +10,6 @@ namespace Screenshot.Services.Capture;
 
 /// <summary>
 /// DXGI Desktop Duplication API 캡처 엔진
-/// 하드웨어 가속, DLP 후킹 우회
 /// </summary>
 public class DxgiCapture : ICaptureEngine, IDisposable
 {
@@ -19,22 +18,63 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     private Output1? _output;
     private Adapter1? _adapter;
     private Factory1? _factory;
+
+    // IsAvailable 캐싱 - 세션 끊김 방지
+    private bool? _cachedAvailability;
+    private DateTime _lastAvailabilityCheck;
+    private static readonly TimeSpan AvailabilityCacheTime = TimeSpan.FromSeconds(30);
+    private static readonly object AvailabilityLock = new();
     
     public string Name => "DXGI Hardware";
-    public int Priority => 20; // 중간 우선순위
+    public int Priority => 1; // 최우선
     
     public bool IsAvailable
     {
         get
         {
-            try
+            lock (AvailabilityLock)
             {
-                TestInitialize();
-                return true;
-            }
-            catch
-            {
-                return false;
+                // 캐시된 결과가 유효하면 사용
+                if (_cachedAvailability.HasValue && 
+                    DateTime.Now - _lastAvailabilityCheck < AvailabilityCacheTime)
+                {
+                    CaptureLogger.Verbose("DXGI", $"IsAvailable 캐시 사용: {_cachedAvailability.Value}");
+                    return _cachedAvailability.Value;
+                }
+
+                try
+                {
+                    // 초기화되어 있고 세션이 유효하면 재사용
+                    if (_device != null && _duplication != null)
+                    {
+                        try
+                        {
+                            // 세션 유효성 테스트 - 가벼운 체크
+                            _duplication.ReleaseFrame();
+                            _cachedAvailability = true;
+                            _lastAvailabilityCheck = DateTime.Now;
+                            CaptureLogger.Verbose("DXGI", "IsAvailable: 기존 세션 유효");
+                            return true;
+                        }
+                        catch (SharpDXException ex) when (ex.ResultCode == SharpDX.DXGI.ResultCode.AccessLost)
+                        {
+                            CaptureLogger.Warn("DXGI", "세션 만료됨, 재초기화 필요");
+                            Dispose();
+                        }
+                    }
+                    
+                    TestInitialize();
+                    _cachedAvailability = true;
+                    CaptureLogger.Verbose("DXGI", "IsAvailable: TestInitialize 성공");
+                }
+                catch (Exception ex)
+                {
+                    CaptureLogger.LogDxgi("IsAvailable 체크 실패", ex);
+                    _cachedAvailability = false;
+                }
+                
+                _lastAvailabilityCheck = DateTime.Now;
+                return _cachedAvailability.Value;
             }
         }
     }
@@ -51,25 +91,103 @@ public class DxgiCapture : ICaptureEngine, IDisposable
 
     public CaptureResult CaptureFullScreen()
     {
+        // 최대 3회 재시도
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            var result = TryCaptureFullScreen(attempt);
+            if (result.Success && result.Image != null)
+            {
+                // 검은 화면 체크
+                if (!IsBlackImage(result.Image))
+                {
+                    // 캐시 업데이트
+                    lock (AvailabilityLock)
+                    {
+                        _cachedAvailability = true;
+                        _lastAvailabilityCheck = DateTime.Now;
+                    }
+                    return result;
+                }
+                
+                CaptureLogger.Warn("DXGI", $"시도 {attempt}: 검은 화면, 재시도 중...");
+                result.Image.Dispose();
+                
+                // 리소스 완전 정리 후 재초기화
+                FullDispose();
+                Thread.Sleep(300 * attempt); // 점진적 대기
+            }
+            else if (result.Success)
+            {
+                return result;
+            }
+            else
+            {
+                // 오류 시 재시도
+                CaptureLogger.Warn("DXGI", $"시도 {attempt} 실패: {result.ErrorMessage}");
+                
+                if (attempt < 3)
+                {
+                    FullDispose();
+                    Thread.Sleep(300 * attempt);
+                }
+                else
+                {
+                    // 최종 실패 - 캐시 무효화
+                    lock (AvailabilityLock)
+                    {
+                        _cachedAvailability = false;
+                        _lastAvailabilityCheck = DateTime.Now;
+                    }
+                    return result;
+                }
+            }
+        }
+
+        return new CaptureResult { Success = false, ErrorMessage = "DXGI 3회 재시도 후 실패" };
+    }
+
+    private void FullDispose()
+    {
+        Dispose();
+        // GC 강제 호출로 COM 객체 완전 정리
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    private CaptureResult TryCaptureFullScreen(int attempt)
+    {
+        var sw = Stopwatch.StartNew();
+        CaptureLogger.LogDxgi($"캡처 시도 #{attempt}");
+        
         try
         {
             Initialize();
             if (_duplication == null)
                 return new CaptureResult { Success = false, ErrorMessage = "DXGI 초기화 실패" };
 
-            // 프레임 획득
-            var result = _duplication.TryAcquireNextFrame(1000, out var frameInfo, out var desktopResource);
+            // 이전 프레임 해제 (중요!)
+            try { _duplication.ReleaseFrame(); } catch { }
+
+            // 새 프레임 획득
+            Thread.Sleep(100); // 프레임 준비 시간
+            
+            var result = _duplication.TryAcquireNextFrame(2000, out var frameInfo, out var desktopResource);
+            
+            CaptureLogger.Verbose("DXGI", $"TryAcquireNextFrame: {result.Code:X8}, AccumulatedFrames={frameInfo.AccumulatedFrames}");
             
             if (!result.Success)
             {
-                return new CaptureResult { Success = false, ErrorMessage = "프레임 획득 실패" };
+                return new CaptureResult { Success = false, ErrorMessage = $"프레임 획득 실패: 0x{result.Code:X8}" };
             }
 
-            // 프레임 획득 성공 - 반드시 ReleaseFrame 호출 필요
             try
             {
                 using var texture = desktopResource.QueryInterface<Texture2D>();
                 var bitmap = TextureToBitmap(texture);
+                
+                sw.Stop();
+                CaptureLogger.LogDxgi($"캡처 완료 - {bitmap.Width}x{bitmap.Height}, {sw.ElapsedMilliseconds}ms");
                 
                 return new CaptureResult
                 {
@@ -80,24 +198,24 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             }
             finally
             {
-                // 성공/실패 관계없이 프레임은 반드시 해제
                 _duplication.ReleaseFrame();
             }
         }
         catch (SharpDXException dxEx) when (dxEx.ResultCode == SharpDX.DXGI.ResultCode.AccessLost)
         {
-            // DXGI 오류: 데스크톱 복제 세션이 끊어짐 (Ctrl+Alt+Del, 로그오프 등)
-            // 디바이스를 재초기화 필요
+            CaptureLogger.LogDxgi("DXGI 세션 종료됨 (AccessLost)", dxEx);
             Dispose();
-            return new CaptureResult { Success = false, ErrorMessage = "DXGI 세션 종료됨 (재시도 필요)" };
+            return new CaptureResult { Success = false, ErrorMessage = "DXGI 세션 종료됨" };
         }
         catch (SharpDXException dxEx) when (dxEx.ResultCode == SharpDX.DXGI.ResultCode.AccessDenied)
         {
-            // UAC 화면 등 보안 화면
+            CaptureLogger.LogDxgi("DXGI 접근 거부됨", dxEx);
             return new CaptureResult { Success = false, ErrorMessage = "DXGI 접근 거부됨 (보안 화면)" };
         }
         catch (Exception ex)
         {
+            CaptureLogger.LogDxgi("DXGI 예외", ex);
+            Dispose();
             return new CaptureResult { Success = false, ErrorMessage = $"DXGI 오류: {ex.Message}" };
         }
     }
@@ -123,6 +241,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             var cropped = new Bitmap(region.Width, region.Height);
             using (var g = Graphics.FromImage(cropped))
                 g.DrawImage(original, new Rectangle(0, 0, region.Width, region.Height), region, GraphicsUnit.Pixel);
+            
             return new CaptureResult { Success = true, Image = cropped, EngineName = Name };
         }
         catch (Exception ex)
@@ -135,6 +254,8 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     {
         if (_device != null) return;
         
+        CaptureLogger.DebugLog("DXGI", "초기화 시작");
+        
         Factory1? factory = null;
         Adapter1? adapter = null;
         Output1? output1 = null;
@@ -143,24 +264,27 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         {
             factory = new Factory1();
             adapter = factory.GetAdapter1(0);
+            
+            CaptureLogger.Verbose("DXGI", $"어댑터: {adapter.Description.Description}");
+            
             _device = new SharpDX.Direct3D11.Device(adapter);
             var output = adapter.GetOutput(0);
             output1 = output.QueryInterface<Output1>();
+            
             _duplication = output1.DuplicateOutput(_device);
             
-            // 성공적으로 초기화된 경우에만 참조 저장
+            CaptureLogger.DebugLog("DXGI", "Desktop Duplication 초기화 성공");
+            
             _factory = factory;
             _adapter = adapter;
             _output = output1;
             
-            // 중간 객체들은 Dispose되지 않도록 null 처리
             factory = null;
             adapter = null;
             output1 = null;
         }
         catch
         {
-            // 실패 시 정리
             output1?.Dispose();
             adapter?.Dispose();
             factory?.Dispose();
@@ -174,7 +298,6 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         var width = desc.Width;
         var height = desc.Height;
 
-        // Staging texture 생성 (CPU 접근 가능)
         var stagingDesc = new Texture2DDescription
         {
             Width = width,
@@ -189,7 +312,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             OptionFlags = ResourceOptionFlags.None
         };
 
-        if (_device == null) throw new InvalidOperationException("DXGI 디바이스가 초기화되지 않았습니다");
+        if (_device == null) throw new InvalidOperationException("DXGI 디바이스 초기화되지 않음");
         
         using var stagingTexture = new Texture2D(_device, stagingDesc);
         _device.ImmediateContext.CopyResource(texture, stagingTexture);
@@ -223,6 +346,31 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         return bitmap;
     }
 
+    private bool IsBlackImage(Bitmap bitmap)
+    {
+        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
+
+        int sampleCount = Math.Min(20, Math.Max(5, bitmap.Width * bitmap.Height / 100));
+        int blackCount = 0;
+        var random = new Random();
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            int x = random.Next(bitmap.Width);
+            int y = random.Next(bitmap.Height);
+
+            try
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.R < 15 && pixel.G < 15 && pixel.B < 15)
+                    blackCount++;
+            }
+            catch { }
+        }
+
+        return (double)blackCount / sampleCount >= 0.85;
+    }
+
     public void Dispose()
     {
         _duplication?.Dispose();
@@ -230,5 +378,10 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         _device?.Dispose();
         _adapter?.Dispose();
         _factory?.Dispose();
+        _duplication = null;
+        _output = null;
+        _device = null;
+        _adapter = null;
+        _factory = null;
     }
 }

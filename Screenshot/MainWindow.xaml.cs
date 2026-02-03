@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -89,15 +90,20 @@ public partial class MainWindow : Window
 
     #region 비동기 작업 헬퍼
 
-    private async void SafeExecuteAsync(Func<Task> asyncAction)
+    private async void SafeExecuteAsync(Func<Task> asyncAction, string actionName = "")
     {
+        Debug.WriteLine($"[SafeExecuteAsync] 시작: {actionName}");
+        Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[SafeExecuteAsync] 시작: {actionName}");
         try
         {
             await asyncAction();
+            Debug.WriteLine($"[SafeExecuteAsync] 완료: {actionName}");
+            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[SafeExecuteAsync] 완료: {actionName}");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"캡처 작업 실패: {ex.Message}");
+            Debug.WriteLine($"[SafeExecuteAsync] 예외 ({actionName}): {ex}");
+            Services.Capture.CaptureLogger.Error("MainWindow", $"[SafeExecuteAsync] 예외 ({actionName})", ex);
             Dispatcher.Invoke(() =>
             {
                 StatusText.Text = $"오류: {ex.Message}";
@@ -145,27 +151,83 @@ public partial class MainWindow : Window
 
     private async Task CaptureRegionAsync()
     {
-        if (_isCapturing) return;
+        Services.Capture.CaptureLogger.Info("RegionCapture", $"=== 시작, _isCapturing={_isCapturing} ===");
+        Debug.WriteLine($"[CaptureRegionAsync] 시작, _isCapturing={_isCapturing}");
+        if (_isCapturing) 
+        {
+            Services.Capture.CaptureLogger.Warn("RegionCapture", "이미 캡처 중, 리턴");
+            Debug.WriteLine("[CaptureRegionAsync] 이미 캡처 중, 리턴");
+            return;
+        }
         _isCapturing = true;
+        Services.Capture.CaptureLogger.DebugLog("RegionCapture", "_isCapturing=true 설정됨");
 
         try
         {
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "Hide() 호출");
             Hide();
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "Hide() 완료, Delay 시작");
             await Task.Delay(200);
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "Delay 완료, CaptureScreen 호출");
 
-            var capturedScreen = CaptureOverlay.CaptureScreen();
+            System.Diagnostics.Debug.WriteLine("[RegionCapture] CaptureScreen 호출 전");
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureOverlay.CaptureScreen() 호출");
+
+            System.Drawing.Bitmap? capturedScreen = CaptureOverlay.CaptureScreen();
+
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", $"CaptureOverlay.CaptureScreen 반환: {capturedScreen?.Width}x{capturedScreen?.Height}");
+            System.Diagnostics.Debug.WriteLine($"[RegionCapture] CaptureOverlay.CaptureScreen 결과: {capturedScreen?.Width}x{capturedScreen?.Height}");
+            
             if (capturedScreen == null)
             {
+                System.Diagnostics.Debug.WriteLine("[RegionCapture] capturedScreen is null");
                 Show();
                 StatusText.Text = "화면 캡처 실패";
+                if (_settings.ShowToastNotification)
+                {
+                    _notificationService.ShowCaptureError("화면 캡처에 실패했습니다.");
+                }
+                return;
+            }
+            
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureScreen 완료, Overlay 생성 중...");
+            System.Diagnostics.Debug.WriteLine("[RegionCapture] CaptureOverlay 생성 중...");
+
+            CaptureOverlay overlay;
+            try
+            {
+                overlay = new CaptureOverlay(capturedScreen);
+                Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureOverlay 생성 완료");
+            }
+            catch (Exception ex)
+            {
+                Services.Capture.CaptureLogger.Error("RegionCapture", "CaptureOverlay 생성 실패", ex);
+                System.Diagnostics.Debug.WriteLine($"[RegionCapture] CaptureOverlay 생성 예외: {ex}");
+                Show();
+                StatusText.Text = "오버레이 생성 실패";
+                capturedScreen.Dispose();
                 return;
             }
 
-            var overlay = new CaptureOverlay(capturedScreen);
-            var dialogResult = overlay.ShowDialog();
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "ShowDialog() 호출");
+            System.Diagnostics.Debug.WriteLine("[RegionCapture] Overlay 표시 중...");
+            bool? dialogResult;
+            try
+            {
+                dialogResult = overlay.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                Services.Capture.CaptureLogger.Error("RegionCapture", "ShowDialog 실패", ex);
+                System.Diagnostics.Debug.WriteLine($"[RegionCapture] ShowDialog 예외: {ex}");
+                dialogResult = false;
+            }
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", $"ShowDialog 결과: {dialogResult}");
+            System.Diagnostics.Debug.WriteLine($"[RegionCapture] Overlay 결과: {dialogResult}, SelectedRegion: {overlay.SelectedRegion}");
 
             if (dialogResult == true && overlay.SelectedRegion != System.Drawing.Rectangle.Empty && overlay.CapturedScreen != null)
             {
+                System.Diagnostics.Debug.WriteLine("[RegionCapture] 영역 선택됨, 자르기 진행...");
                 var imageRegion = overlay.ImageRegion;
                 StatusText.Text = $"영역 캡처 중...";
 
@@ -196,6 +258,16 @@ public partial class MainWindow : Window
             Show();
             InvalidateVisual();
             UpdateLayout();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[RegionCapture] 예외 발생: {ex}");
+            Show();
+            StatusText.Text = "영역 캡처 중 오류 발생";
+            if (_settings.ShowToastNotification)
+            {
+                _notificationService.ShowCaptureError($"영역 캡처 오류: {ex.Message}");
+            }
         }
         finally
         {
@@ -241,31 +313,25 @@ public partial class MainWindow : Window
             Hide();
             await Task.Delay(200);
 
-            // 활성 창 캡처
-            var bitmap = _windowCaptureService.CaptureActiveWindow();
+            // CaptureManager를 통해 활성 창 캡처 (DXGI → GDI → PrintWindow 순으로 시도)
+            var windowInfo = _windowCaptureService.GetForegroundWindowInfo();
+            CaptureResult result;
+            
+            if (windowInfo != null)
+            {
+                result = await _captureManager.CaptureWindowAsync(windowInfo.Handle);
+            }
+            else
+            {
+                // 창 정보를 가져올 수 없으면 기본 ActiveWindow 캡처
+                result = await _captureManager.CaptureActiveWindowAsync();
+            }
 
             Show();
             InvalidateVisual();
             UpdateLayout();
 
-            if (bitmap != null)
-            {
-                var result = new CaptureResult
-                {
-                    Success = true,
-                    Image = bitmap,
-                    EngineName = "WindowCapture"
-                };
-                HandleCaptureResult(result);
-            }
-            else
-            {
-                StatusText.Text = "창 캡처 실패";
-                if (_settings.ShowToastNotification)
-                {
-                    _notificationService.ShowCaptureError("창 캡처에 실패했습니다.");
-                }
-            }
+            HandleCaptureResult(result);
         }
         finally
         {
@@ -472,6 +538,8 @@ public partial class MainWindow : Window
                 }
 
                 StatusText.Text = $"캡처 완료 - {result.EngineName}";
+                CaptureLogger.Info("MainWindow", $"캡처 성공 - {result.EngineName}, {result.Image.Width}x{result.Image.Height}");
+                CaptureLogger.FlushToFile(); // 즉시 로그 저장
 
                 ThumbnailScrollViewer.ScrollToRightEnd();
 
@@ -494,6 +562,9 @@ public partial class MainWindow : Window
             else
             {
                 StatusText.Text = $"캡처 실패: {result.ErrorMessage}";
+                CaptureLogger.Error("MainWindow", $"캡처 실패: {result.ErrorMessage}");
+                CaptureLogger.FlushToFile(); // 즉시 로그 저장
+                
                 if (_settings.ShowToastNotification)
                 {
                     _notificationService.ShowCaptureError(result.ErrorMessage ?? "알 수 없는 오류");
@@ -825,7 +896,9 @@ public partial class MainWindow : Window
 
     private void CaptureRegion_Click(object sender, RoutedEventArgs e)
     {
-        SafeExecuteAsync(CaptureRegionAsync);
+        Services.Capture.CaptureLogger.Info("MainWindow", "[CaptureRegion_Click] 버튼 클릭됨");
+        Debug.WriteLine("[CaptureRegion_Click] 버튼 클릭됨");
+        SafeExecuteAsync(CaptureRegionAsync, "CaptureRegionAsync");
     }
 
     private void CaptureWindow_Click(object sender, RoutedEventArgs e)
@@ -1030,6 +1103,8 @@ public partial class MainWindow : Window
         }
 
         // 리소스 정리
+        CaptureLogger.Info("MainWindow", "앱 종료 - 로그 플러시");
+        CaptureLogger.FlushToFile();
         _hotkeyService.Dispose();
         _captureManager.Dispose();
         foreach (var capture in _captureHistory)
@@ -1041,4 +1116,5 @@ public partial class MainWindow : Window
     }
 
     #endregion
+
 }

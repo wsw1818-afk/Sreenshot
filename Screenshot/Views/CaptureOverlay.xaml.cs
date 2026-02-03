@@ -158,12 +158,121 @@ public partial class CaptureOverlay : Window
         Canvas.SetTop(CrosshairCenter, y - 3);
     }
 
+    // Win32 API for BitBlt
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool BitBlt(
+        IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight,
+        IntPtr hdcSrc, int nXSrc, int nYSrc, uint dwRop);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteDC(IntPtr hdc);
+
+    private const uint SRCCOPY = 0x00CC0020;
+    private const uint CAPTUREBLT = 0x40000000;
+
     /// <summary>
     /// 화면을 캡처하고 비트맵 반환 (오버레이 표시 전 호출)
-    /// CopyFromScreen만 사용 (보안 프로그램 호환성)
+    /// BitBlt 사용 (CopyFromScreen보다 안정적)
     /// </summary>
     public static System.Drawing.Bitmap? CaptureScreen()
     {
+        System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 시작");
+        IntPtr hWndDesktop = IntPtr.Zero;
+        IntPtr hdcSrc = IntPtr.Zero;
+        IntPtr hdcDest = IntPtr.Zero;
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr hOld = IntPtr.Zero;
+        System.Drawing.Bitmap? bitmap = null;
+
+        try
+        {
+            var virtualScreen = SystemInformation.VirtualScreen;
+            int width = virtualScreen.Width;
+            int height = virtualScreen.Height;
+            int x = virtualScreen.X;
+            int y = virtualScreen.Y;
+            
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] VirtualScreen: {width}x{height} @ ({x},{y})");
+
+            hWndDesktop = GetDesktopWindow();
+            hdcSrc = GetWindowDC(hWndDesktop);
+            
+            if (hdcSrc == IntPtr.Zero)
+            {
+                System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] GetWindowDC 실패");
+                return CaptureScreenWithCopyFromScreen();
+            }
+            
+            hdcDest = CreateCompatibleDC(hdcSrc);
+            hBitmap = CreateCompatibleBitmap(hdcSrc, width, height);
+            hOld = SelectObject(hdcDest, hBitmap);
+
+            // BitBlt로 화면 캡처 (CAPTUREBLT 플래그로 레이어드 창도 포함)
+            bool success = BitBlt(
+                hdcDest, 0, 0, width, height,
+                hdcSrc, x, y, SRCCOPY | CAPTUREBLT);
+
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] BitBlt success: {success}");
+
+            if (!success)
+            {
+                // BitBlt 실패시 CopyFromScreen으로 폭백
+                return CaptureScreenWithCopyFromScreen();
+            }
+
+            bitmap = System.Drawing.Image.FromHbitmap(hBitmap);
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] Bitmap 생성됨: {bitmap.Width}x{bitmap.Height}");
+            
+            // 검은 화면 체크
+            if (IsBlackImage(bitmap))
+            {
+                System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 검은 화면 감지, CopyFromScreen으로 폭백");
+                bitmap.Dispose();
+                return CaptureScreenWithCopyFromScreen();
+            }
+
+            System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 성공");
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] 예외: {ex.Message}");
+            bitmap?.Dispose();
+            return CaptureScreenWithCopyFromScreen();
+        }
+        finally
+        {
+            if (hOld != IntPtr.Zero) SelectObject(hdcDest, hOld);
+            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+            if (hdcDest != IntPtr.Zero) DeleteDC(hdcDest);
+            if (hdcSrc != IntPtr.Zero) ReleaseDC(hWndDesktop, hdcSrc);
+        }
+    }
+
+    private static System.Drawing.Bitmap? CaptureScreenWithCopyFromScreen()
+    {
+        System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] CopyFromScreen 폭백 시도");
         try
         {
             var virtualScreen = SystemInformation.VirtualScreen;
@@ -172,24 +281,74 @@ public partial class CaptureOverlay : Window
             {
                 g.CopyFromScreen(virtualScreen.X, virtualScreen.Y, 0, 0,
                     new System.Drawing.Size(virtualScreen.Width, virtualScreen.Height),
-                    CopyPixelOperation.SourceCopy);
+                    CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
             }
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] CopyFromScreen 성공: {result.Width}x{result.Height}");
             return result;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] CopyFromScreen 실패: {ex.Message}");
             return null;
         }
     }
 
+    private static bool IsBlackImage(System.Drawing.Bitmap bitmap)
+    {
+        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
+
+        int sampleCount = Math.Min(20, Math.Max(5, bitmap.Width * bitmap.Height / 100));
+        int blackCount = 0;
+        var random = new Random();
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            int x = random.Next(bitmap.Width);
+            int y = random.Next(bitmap.Height);
+
+            try
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.R < 15 && pixel.G < 15 && pixel.B < 15)
+                    blackCount++;
+            }
+            catch { }
+        }
+
+        return (double)blackCount / sampleCount >= 0.85;
+    }
+
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        using var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
-        ms.Position = 0;
+        // BitmapSource.Create 직접 사용 (MemoryStream 불필요, 더 빠름)
+        var bitmapData = bitmap.LockBits(
+            new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 
-        var decoder = BitmapDecoder.Create(ms, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-        return decoder.Frames[0];
+        try
+        {
+            var stride = bitmapData.Stride;
+            var pixelData = new byte[stride * bitmap.Height];
+            Marshal.Copy(bitmapData.Scan0, pixelData, 0, pixelData.Length);
+
+            var bitmapSource = BitmapSource.Create(
+                bitmap.Width,
+                bitmap.Height,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null,
+                pixelData,
+                stride);
+
+            bitmapSource.Freeze();
+            return bitmapSource;
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
