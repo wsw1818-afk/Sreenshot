@@ -1,75 +1,134 @@
-# PROGRESS.md (현재 진행: 얇게 유지)
+# PROGRESS.md - SmartCapture 개발 진행 상황
 
-## Dashboard
-- Progress: 95%
-- Token/Cost 추정: 낮음
-- Risk: 낮음
+## 📊 개요
+- **프로젝트**: SmartCapture (스크린샷 캡처 도구)
+- **플랫폼**: Windows 10/11 (.NET 8.0)
+- **상태**: 테스트/디버깅 중
 
-## Today Goal
-- 캡처 엔진 안정화 및 코드 정리 완료
+---
 
-## Current Status
+## ✅ 완료된 기능
 
-### ✅ 완료된 작업
+### 캡처 엔진
+| 기능 | 상태 | 비고 |
+|------|------|------|
+| DXGI Hardware 캡처 | ✅ | Desktop Duplication API 사용 |
+| GDI Capture (BitBlt) | ✅ | 폭백용 |
+| CopyFromScreen | ✅ | 영역 선택용 |
+| 캡처 엔진 캐싱 | ✅ | 30초 캐시, 세션 재사용 |
 
-1. **DxgiCapture 캐싱 시스템 개선**
-   - IsAvailable 30초 캐시 구현
-   - Desktop Duplication 세션 유효성 체크
-   - 세션 만료시 자동 재초기화
-   - ~~unused `_retryCount` 필드~~ → 제거 완료
+### 캡처 모드
+| 모드 | 상태 | 비고 |
+|------|------|------|
+| 전체 화면 캡처 | ✅ | DXGI 사용, 정상 작동 |
+| 영역 선택 캡처 | ✅ | Opacity 0.01 + 화면 밖 이동 |
+| 창 캡처 | ✅ | PrintWindow 폭백 |
+| 모니터 캡처 | ✅ | |
 
-2. **GDI Capture 강화**
-   - BitBlt + CAPTUREBLT 플래그 구현
-   - CopyFromScreen 폴백 추가
-   - 검은 화면 자동 재시도
+### 저장 기능
+| 기능 | 상태 | 비고 |
+|------|------|------|
+| 자동 저장 | ✅ | 설정 가능 |
+| 클립보드 복사 | ✅ | |
+| 날짜별 폭더 정리 | ✅ | |
+| PNG/JPG/BMP 지원 | ✅ | |
 
-3. **CaptureManager 통합**
-   - 모든 캡처 모드(FullScreen, Region, Monitor, ActiveWindow, Window) 통합
-   - _lastSuccessfulEngine 로깅 강화
-   - CaptureWindowAsync 추가 (DXGI → GDI → PrintWindow 순)
+---
 
-4. **영역 캡처 (CaptureOverlay) - DPI 스케일링 수정**
-   - WPF 좌표계와 물리적 좌표계 분리
-   - `_wpfScreenWidth`, `_wpfScreenHeight`로 WPF 좌표 크기 계산
-   - WPF→물리적 좌표 변환으로 정확한 영역 캡처
-   - 십자선 커서 추가 (가시성 향상)
+## 🔧 주요 수정사항 (최근)
 
-5. **코드 품질 개선 (Critical + Medium 버그 수정)**
-   - MainWindow.xaml.cs: Dispose 중복 호출 방지
-   - ChromeCaptureService.cs: null-forgiving 연산자 제거
-   - ScrollCaptureService.cs: 음수 height 방지, GetPixel 경계 검사
-   - HotkeyService.cs: 핫키 등록 실패 시 롤백
-   - MainWindow.xaml.cs:AddThumbnail: null 체크 추가
+### 2026-02-03
 
-6. **코드 정리 완료**
-   - ~~MainWindow.CaptureScreenDirect()~~ → 제거, CaptureOverlay.CaptureScreen() 사용
-   - ~~DxgiCapture._retryCount~~ → 제거 (unused warning 해결)
-   - 중복 코드 제거 완료
+#### 1. 영역 선택 캡처 개선
+**문제**: `Visibility = Collapsed` 상태에서 `CopyFromScreen`이 검은 화면 반환
 
-### 📋 남은 작업
+**해결책**:
+```csharp
+// Before: Visibility 변경 (실패)
+Visibility = Visibility.Collapsed;
 
-7. **전체 기능 테스트 (선택)**
-   - [ ] 전체 화면 캡처 (DXGI 캐싱 확인)
-   - [ ] 영역 선택 캡처 (DPI 스케일링 검증)
-   - [ ] 창 캡처 (PrintWindow 폴백)
-   - [ ] 모니터 캡처
-   - [ ] 스크롤 캡처
+// After: Opacity + 위치 이동 (성공)
+Opacity = 0.01;           // 거의 투명
+Left = -5000;             // 화면 밖
+Top = -5000;
+await Task.Delay(500);    // DWM 대기
+```
 
-## Known Issues
+**코드 위치**: `MainWindow.xaml.cs` - `CaptureRegionAsync()`
 
-| Issue | Status | Description |
-|-------|--------|-------------|
-| ~~CaptureOverlay.CaptureScreen 미작동~~ | ✅ 해결 | 중복 코드 제거 후 정상 작동 |
-| ~~_retryCount unused warning~~ | ✅ 해결 | 필드 제거 완료 |
+#### 2. DXGI 세션 충돌 방지
+**문제**: `DxgiCapture`를 직접 생성하면 세션 충돌 발생
 
-## Build Status
-- Debug: ✅ 성공 (경고 0개)
-- Release: ✅ 성공 (경고 0개)
+**해결책**: 영역 선택에서는 `CopyFromScreen`만 사용, 전체 화면에서만 DXGI 사용
 
-## Files Modified (이번 세션)
-- Screenshot/Services/Capture/DxgiCapture.cs (_retryCount 제거)
-- Screenshot/MainWindow.xaml.cs (CaptureScreenDirect 중복 코드 제거)
+#### 3. 저장 로깅 강화
+- 저장 경로 및 성공/실패 로그 추가
+- `CaptureManager.SaveToFile()`에 상세 로깅
 
-## Next Steps
-1. 배포 빌드 및 결과물 폴더 복사
-2. Git 커밋
+---
+
+## ⚠️ 알려진 이슈
+
+### 1. DXGI 세션 만료
+- 증상: 연속 캡처 시 `IsAvailable=False`, 이후 GDI로 폭백
+- 원인: Desktop Duplication 세션의 수명 제한
+- 우회: GDI로 자동 폭백
+
+### 2. CopyFromScreen 제한
+- `Visibility=Collapsed` 또는 `Opacity=0` 상태에서 검은 화면
+- `Opacity=0.01` + 화면 밖 이동으로 해결
+
+### 3. DRM 콘텐츠
+- Netflix, Disney+ 등: HDCP로 인해 검은 화면
+- 이는 우회 불가능 (하드웨어 레벨 보호)
+
+---
+
+## 📁 파일 위치
+
+### 실행 파일
+- **Debug**: `Screenshot\bin\Debug\net8.0-windows10.0.19041.0\win-x64\`
+- **Release**: `publish_final\` 또는 `D:\Onedrive\코드작업\결과물\SmartCapture\`
+
+### 로그 파일
+- 위치: `%LOCALAPPDATA%\SmartCapture\Logs\`
+- 파일명: `capture_YYYYMMDD_HHmmss.log`
+
+### 설정 파일
+- 위치: `%APPDATA%\SmartCapture\settings.json`
+
+---
+
+## 🔜 다음 작업
+
+1. **Release 빌드 최적화**
+   - 디버그 로그 제거 또는 조걸 컴파일
+   - 단일 파일 게시 최적화
+
+2. **설치 프로그램**
+   - .NET 8.0 런타임 포함 여부 결정
+   - 자동 업데이트 기능
+
+3. **추가 기능**
+   - 스크롤 캡처 안정화
+   - OCR 기능 개선
+   - 편집 기능 강화
+
+---
+
+## 📝 디버깅 팁
+
+### 로그 확인
+```powershell
+# 최신 로그 보기
+Get-Content "$env:LOCALAPPDATA\SmartCapture\Logs\$(Get-ChildItem $env:LOCALAPPDATA\SmartCapture\Logs | Sort-Object LastWriteTime -Descending | Select-Object -First 1).Name" -Tail 50
+```
+
+### 설정 초기화
+```powershell
+Remove-Item "$env:APPDATA\SmartCapture\settings.json"
+```
+
+---
+
+**마지막 업데이트**: 2026-02-03

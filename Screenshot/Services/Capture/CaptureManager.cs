@@ -338,13 +338,17 @@ public class CaptureManager : IDisposable
     private string SaveToFile(Bitmap image)
     {
         var saveFolder = _settings.SaveFolder;
+        CaptureLogger.DebugLog("Save", $"기본 저장 폭더: {saveFolder}");
+        
         if (_settings.OrganizeByDate)
         {
             saveFolder = Path.Combine(saveFolder, DateTime.Now.ToString("yyyy-MM-dd"));
+            CaptureLogger.DebugLog("Save", $"날짜별 폭더: {saveFolder}");
         }
 
         if (!Directory.Exists(saveFolder))
         {
+            CaptureLogger.DebugLog("Save", $"폭더 생성: {saveFolder}");
             Directory.CreateDirectory(saveFolder);
         }
 
@@ -358,6 +362,7 @@ public class CaptureManager : IDisposable
         };
 
         var filePath = Path.Combine(saveFolder, fileName + extension);
+        CaptureLogger.Info("Save", $"파일 저장: {filePath}");
 
         int counter = 1;
         while (File.Exists(filePath))
@@ -386,7 +391,8 @@ public class CaptureManager : IDisposable
         {
             image.Save(filePath, format);
         }
-
+        
+        CaptureLogger.Info("Save", $"저장 완료: {filePath}");
         return filePath;
     }
 

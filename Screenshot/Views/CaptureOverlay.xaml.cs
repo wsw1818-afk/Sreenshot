@@ -76,28 +76,33 @@ public partial class CaptureOverlay : Window
         // 전달받은 캡처 이미지 저장
         _capturedScreen = capturedScreen;
 
-        // DPI 스케일 먼저 계산 (창 표시 전)
+        // DPI 스케일 계산 (WPF는 DIP 단위를 사용)
         using (var g = Graphics.FromHwnd(IntPtr.Zero))
         {
             _dpiScale = g.DpiX / 96.0;
         }
-
-        // WPF 좌표계 크기 계산 (물리적 픽셀 / DPI 스케일)
+        
+        // WPF DIP 크기 = 물리적 픽셀 / DPI 스케일
         _wpfScreenWidth = _screenWidth / _dpiScale;
         _wpfScreenHeight = _screenHeight / _dpiScale;
 
-        // 배경 이미지 설정 - WPF 좌표계 크기 사용
+        // 배경 이미지 설정 - DIP 크기로 설정 (렌더링시 물리적 픽셀로 변환됨)
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
         BackgroundImage.Source = bitmapSource;
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
+        BackgroundImage.Stretch = Stretch.Fill;  // 비트맵을 꽉 채우기
 
-        // 창 설정 - WPF 좌표계 크기 사용
+        // 창 설정 - 주 모니터 기준으로 설정 (모든 모니터 커버)
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = _screenX / _dpiScale;
-        Top = _screenY / _dpiScale;
+        Left = 0;
+        Top = 0;
         Width = _wpfScreenWidth;
         Height = _wpfScreenHeight;
+        
+        // 창이 화면을 완전히 덮도록 설정
+        WindowState = WindowState.Normal;
+        ResizeMode = ResizeMode.NoResize;
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
@@ -197,77 +202,8 @@ public partial class CaptureOverlay : Window
     /// </summary>
     public static System.Drawing.Bitmap? CaptureScreen()
     {
-        System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 시작");
-        IntPtr hWndDesktop = IntPtr.Zero;
-        IntPtr hdcSrc = IntPtr.Zero;
-        IntPtr hdcDest = IntPtr.Zero;
-        IntPtr hBitmap = IntPtr.Zero;
-        IntPtr hOld = IntPtr.Zero;
-        System.Drawing.Bitmap? bitmap = null;
-
-        try
-        {
-            var virtualScreen = SystemInformation.VirtualScreen;
-            int width = virtualScreen.Width;
-            int height = virtualScreen.Height;
-            int x = virtualScreen.X;
-            int y = virtualScreen.Y;
-            
-            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] VirtualScreen: {width}x{height} @ ({x},{y})");
-
-            hWndDesktop = GetDesktopWindow();
-            hdcSrc = GetWindowDC(hWndDesktop);
-            
-            if (hdcSrc == IntPtr.Zero)
-            {
-                System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] GetWindowDC 실패");
-                return CaptureScreenWithCopyFromScreen();
-            }
-            
-            hdcDest = CreateCompatibleDC(hdcSrc);
-            hBitmap = CreateCompatibleBitmap(hdcSrc, width, height);
-            hOld = SelectObject(hdcDest, hBitmap);
-
-            // BitBlt로 화면 캡처 (CAPTUREBLT 플래그로 레이어드 창도 포함)
-            bool success = BitBlt(
-                hdcDest, 0, 0, width, height,
-                hdcSrc, x, y, SRCCOPY | CAPTUREBLT);
-
-            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] BitBlt success: {success}");
-
-            if (!success)
-            {
-                // BitBlt 실패시 CopyFromScreen으로 폭백
-                return CaptureScreenWithCopyFromScreen();
-            }
-
-            bitmap = System.Drawing.Image.FromHbitmap(hBitmap);
-            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] Bitmap 생성됨: {bitmap.Width}x{bitmap.Height}");
-            
-            // 검은 화면 체크
-            if (IsBlackImage(bitmap))
-            {
-                System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 검은 화면 감지, CopyFromScreen으로 폭백");
-                bitmap.Dispose();
-                return CaptureScreenWithCopyFromScreen();
-            }
-
-            System.Diagnostics.Debug.WriteLine("[CaptureOverlay.CaptureScreen] 성공");
-            return bitmap;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] 예외: {ex.Message}");
-            bitmap?.Dispose();
-            return CaptureScreenWithCopyFromScreen();
-        }
-        finally
-        {
-            if (hOld != IntPtr.Zero) SelectObject(hdcDest, hOld);
-            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
-            if (hdcDest != IntPtr.Zero) DeleteDC(hdcDest);
-            if (hdcSrc != IntPtr.Zero) ReleaseDC(hWndDesktop, hdcSrc);
-        }
+        // CopyFromScreen만 사용 (BitBlt는 Windows 11에서 검은 화면 문제)
+        return CaptureScreenWithCopyFromScreen();
     }
 
     private static System.Drawing.Bitmap? CaptureScreenWithCopyFromScreen()
@@ -279,9 +215,10 @@ public partial class CaptureOverlay : Window
             var result = new System.Drawing.Bitmap(virtualScreen.Width, virtualScreen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(result))
             {
+                // SourceCopy만 사용 (CaptureBlt는 일부 환경에서 InvalidEnumArgumentException)
                 g.CopyFromScreen(virtualScreen.X, virtualScreen.Y, 0, 0,
                     new System.Drawing.Size(virtualScreen.Width, virtualScreen.Height),
-                    CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                    CopyPixelOperation.SourceCopy);
             }
             System.Diagnostics.Debug.WriteLine($"[CaptureOverlay.CaptureScreen] CopyFromScreen 성공: {result.Width}x{result.Height}");
             return result;
@@ -320,35 +257,19 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        // BitmapSource.Create 직접 사용 (MemoryStream 불필요, 더 빠름)
-        var bitmapData = bitmap.LockBits(
-            new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height),
-            ImageLockMode.ReadOnly,
-            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        // MemoryStream 방식 - 가장 안정적
+        using var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        ms.Position = 0;
 
-        try
-        {
-            var stride = bitmapData.Stride;
-            var pixelData = new byte[stride * bitmap.Height];
-            Marshal.Copy(bitmapData.Scan0, pixelData, 0, pixelData.Length);
-
-            var bitmapSource = BitmapSource.Create(
-                bitmap.Width,
-                bitmap.Height,
-                96,
-                96,
-                PixelFormats.Bgra32,
-                null,
-                pixelData,
-                stride);
-
-            bitmapSource.Freeze();
-            return bitmapSource;
-        }
-        finally
-        {
-            bitmap.UnlockBits(bitmapData);
-        }
+        var bitmapImage = new BitmapImage();
+        bitmapImage.BeginInit();
+        bitmapImage.StreamSource = ms;
+        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+        bitmapImage.EndInit();
+        bitmapImage.Freeze();
+        
+        return bitmapImage;
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -373,6 +294,7 @@ public partial class CaptureOverlay : Window
         _isSelecting = true;
 
         HelpPanel.Visibility = Visibility.Collapsed;
+        DimOverlay.Visibility = Visibility.Visible;  // 어두운 오버레이 표시
 
         SelectionBorder.Visibility = Visibility.Visible;
         SizeLabel.Visibility = Visibility.Visible;
@@ -416,7 +338,13 @@ public partial class CaptureOverlay : Window
 
     private void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_isSelecting) return;
+        System.Diagnostics.Debug.WriteLine($"[CaptureOverlay] MouseLeftButtonUp - _isSelecting={_isSelecting}");
+        
+        if (!_isSelecting)
+        {
+            System.Diagnostics.Debug.WriteLine("[CaptureOverlay] _isSelecting=false, 리턴");
+            return;
+        }
 
         _isSelecting = false;
 
@@ -428,8 +356,11 @@ public partial class CaptureOverlay : Window
         double wpfWidth = Math.Abs(_currentPointWpf.X - _startPointWpf.X);
         double wpfHeight = Math.Abs(_currentPointWpf.Y - _startPointWpf.Y);
 
+        System.Diagnostics.Debug.WriteLine($"[CaptureOverlay] 선택 영역: {wpfWidth}x{wpfHeight}");
+
         if (wpfWidth < 10 || wpfHeight < 10)
         {
+            System.Diagnostics.Debug.WriteLine("[CaptureOverlay] 영역 너무 작음 (<10), 취소");
             DialogResult = false;
             Close();
             return;

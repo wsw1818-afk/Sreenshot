@@ -197,11 +197,12 @@ public class GdiCapture : CaptureEngineBase
         var bitmap = new Bitmap(region.Width, region.Height, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bitmap))
         {
+            // SourceCopy만 사용 (CaptureBlt는 일부 환경에서 InvalidEnumArgumentException)
             g.CopyFromScreen(
                 region.X, region.Y, 
                 0, 0, 
                 new Size(region.Width, region.Height),
-                CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                CopyPixelOperation.SourceCopy);
         }
 
         return new CaptureResult
