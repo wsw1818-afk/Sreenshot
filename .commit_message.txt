@@ -1,1 +1,1 @@
-🔙 롤백: 영역 캡처 이전 작동 버전으로 복원 (PerMonitorV2 + MemoryStream 방식)
+🐛 버그 수정: 듀얼 모니터 검은 화면 해결 - Hide() 대신 Opacity 방식 사용
