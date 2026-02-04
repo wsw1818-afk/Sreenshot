@@ -12,9 +12,9 @@
     <AssemblyName>SmartCapture</AssemblyName>
     <RootNamespace>Screenshot</RootNamespace>
 
-    <!-- Per-Monitor DPI Awareness V2 -->
+    <!-- System DPI Awareness (멀티모니터에서 DPI 스케일링 문제 방지) -->
     <WindowsPackageType>None</WindowsPackageType>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     
     <!-- WinRT 캡처용 설정 -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

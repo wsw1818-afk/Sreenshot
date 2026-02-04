@@ -267,25 +267,58 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        // MemoryStream 방식 - 가장 안정적
-        var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
-        ms.Position = 0;
+        // BitmapData로 직접 복사 (DPI를 96으로 고정하여 WPF 스케일링 방지)
+        var bitmapData = bitmap.LockBits(
+            new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 
-        var bitmapImage = new BitmapImage();
-        bitmapImage.BeginInit();
-        bitmapImage.StreamSource = ms;
-        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
-        bitmapImage.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
-        bitmapImage.EndInit();
-        
-        // 로드 완료 대기
-        bitmapImage.Freeze();
-        
-        // 스트림은 Freeze 후에 닫음
-        ms.Dispose();
-        
-        return bitmapImage;
+        try
+        {
+            // DPI 96으로 고정 - WPF가 스케일링하지 않음
+            var writeableBitmap = new System.Windows.Media.Imaging.WriteableBitmap(
+                bitmap.Width,
+                bitmap.Height,
+                96, // DPI X - 96으로 고정
+                96, // DPI Y - 96으로 고정
+                PixelFormats.Bgra32,
+                null);
+
+            writeableBitmap.Lock();
+            try
+            {
+                // 픽셀 데이터 직접 복사
+                var sourcePtr = bitmapData.Scan0;
+                var destPtr = writeableBitmap.BackBuffer;
+                var stride = bitmapData.Stride;
+                var height = bitmap.Height;
+
+                for (int y = 0; y < height; y++)
+                {
+                    unsafe
+                    {
+                        Buffer.MemoryCopy(
+                            (void*)(sourcePtr + y * stride),
+                            (void*)(destPtr + y * writeableBitmap.BackBufferStride),
+                            writeableBitmap.BackBufferStride,
+                            stride);
+                    }
+                }
+
+                writeableBitmap.AddDirtyRect(new Int32Rect(0, 0, bitmap.Width, bitmap.Height));
+            }
+            finally
+            {
+                writeableBitmap.Unlock();
+            }
+
+            writeableBitmap.Freeze();
+            return writeableBitmap;
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
