@@ -166,25 +166,24 @@ public partial class MainWindow : Window
         _isCapturing = true;
         Services.Capture.CaptureLogger.DebugLog("RegionCapture", "_isCapturing=true 설정됨");
 
+        // 원래 위치/투명도 저장 (복원용)
+        var originalLeft = Left;
+        var originalTop = Top;
+        var originalOpacity = Opacity;
+
         try
         {
-            // 창 숨기기 - Opacity 방식 (Hide()는 DWM이 화면을 갱신하기 전에 CopyFromScreen이 호출되어 검은 화면 발생)
+            // 창 숨기기 - Opacity 방식 (Hide()는 DWM 갱신 전 CopyFromScreen 호출로 검은 화면 발생)
             // Opacity = 0.01로 설정하면 창은 보이지 않지만 DWM은 정상 동작
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨기기 (Opacity 방식)");
 
-            // 원래 위치 저장
-            var originalLeft = Left;
-            var originalTop = Top;
-            var originalOpacity = Opacity;
-
-            // 창을 화면 밖으로 이동하고 거의 투명하게 설정
             Opacity = 0.01;
             Left = -10000;
             Top = -10000;
 
-            // DWM이 화면을 갱신할 시간 (듀얼 모니터에서는 더 길게 필요)
+            // DWM이 화면을 갱신할 시간
             await Task.Delay(300);
-            DwmFlush(); // DWM이 모든 창을 다 그릴 때까지 대기
+            DwmFlush();
 
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, CopyFromScreen으로 가상화면 전체 캡처");
 
@@ -206,7 +205,7 @@ public partial class MainWindow : Window
             if (capturedScreen == null)
             {
                 System.Diagnostics.Debug.WriteLine("[RegionCapture] capturedScreen is null");
-                // 창 복원
+                // 창 복원 (Opacity 방식)
                 Left = originalLeft;
                 Top = originalTop;
                 Opacity = originalOpacity;
@@ -231,7 +230,7 @@ public partial class MainWindow : Window
             {
                 Services.Capture.CaptureLogger.Error("RegionCapture", "CaptureOverlay 생성 실패", ex);
                 System.Diagnostics.Debug.WriteLine($"[RegionCapture] CaptureOverlay 생성 예외: {ex}");
-                // 창 복원
+                // 창 복원 (Opacity 방식)
                 Left = originalLeft;
                 Top = originalTop;
                 Opacity = originalOpacity;
@@ -286,7 +285,7 @@ public partial class MainWindow : Window
             // CapturedScreen은 항상 Dispose (null-safe)
             overlay.CapturedScreen?.Dispose();
 
-            // 창 복원
+            // 창 복원 (Opacity 방식)
             Left = originalLeft;
             Top = originalTop;
             Opacity = originalOpacity;
@@ -296,8 +295,10 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[RegionCapture] 예외 발생: {ex}");
-            // 창 복원 시도 (변수가 스코프 밖일 수 있으므로 Show() 사용)
-            Show();
+            // 창 복원 (Opacity 방식)
+            Left = originalLeft;
+            Top = originalTop;
+            Opacity = originalOpacity;
             StatusText.Text = "영역 캡처 중 오류 발생";
             if (_settings.ShowToastNotification)
             {
@@ -307,12 +308,12 @@ public partial class MainWindow : Window
         finally
         {
             _isCapturing = false;
-            // 최종 안전장치: 창이 보이지 않으면 강제 표시
-            if (Opacity < 1.0 || Left < -5000)
+            // 최종 안전장치: 창이 원래 위치로 복원되지 않았으면 강제 복원
+            if (Opacity < 0.5 || Left < -5000)
             {
-                Opacity = 1.0;
-                Left = 100;
-                Top = 100;
+                Left = originalLeft;
+                Top = originalTop;
+                Opacity = originalOpacity;
             }
         }
     }
@@ -1212,12 +1213,12 @@ public partial class MainWindow : Window
     private const uint CAPTUREBLT = 0x40000000;
 
     /// <summary>
-    /// 영역 캡처용 - 검은 화면 감지 없이 바로 캡처
-    /// (확장 모니터가 검은 배경일 수 있으므로 검증 생략)
+    /// 영역 캡처용 - Opacity 방식 사용시 검은 화면이 나오지 않음
+    /// (확장 모니터가 검은 배경일 수 있으므로 검은 화면 검증 생략)
     /// </summary>
     private static System.Drawing.Bitmap? CaptureScreenForRegion()
     {
-        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenForRegion] CopyFromScreen (검은 화면 검사 없음)");
+        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenForRegion] CopyFromScreen (검은 화면 검사 생략)");
         return CaptureScreenWithCopyFromScreen();
     }
 
