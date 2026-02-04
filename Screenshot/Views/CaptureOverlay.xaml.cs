@@ -93,9 +93,16 @@ public partial class CaptureOverlay : Window
 
         // 배경 이미지 설정
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
+
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+            $"BitmapSource 생성: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}, DPI: {bitmapSource.DpiX}x{bitmapSource.DpiY}");
+
         BackgroundImage.Source = bitmapSource;
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
+
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+            $"BackgroundImage 설정: Width={BackgroundImage.Width}, Height={BackgroundImage.Height}");
 
         // SourceInitialized에서 Win32 API로 창 크기 설정 (WPF DPI 스케일링 우회)
         SourceInitialized += OnSourceInitialized;
