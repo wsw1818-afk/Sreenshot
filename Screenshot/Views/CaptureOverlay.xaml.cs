@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Forms;
@@ -19,6 +20,12 @@ public partial class CaptureOverlay : Window
     // DPI 관련 Win32 API
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const uint SWP_SHOWWINDOW = 0x0040;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -76,39 +83,35 @@ public partial class CaptureOverlay : Window
         // 전달받은 캡처 이미지 저장
         _capturedScreen = capturedScreen;
 
-        // DPI 스케일 계산 (WPF는 DIP 단위를 사용)
-        using (var g = Graphics.FromHwnd(IntPtr.Zero))
-        {
-            _dpiScale = g.DpiX / 96.0;
-        }
-        
-        // WPF DIP 크기 = 물리적 픽셀 / DPI 스케일
-        _wpfScreenWidth = _screenWidth / _dpiScale;
-        _wpfScreenHeight = _screenHeight / _dpiScale;
+        // DPI 스케일 1.0 고정 (물리적 픽셀 사용, Win32 API로 창 크기 설정)
+        _dpiScale = 1.0;
+        _wpfScreenWidth = _screenWidth;
+        _wpfScreenHeight = _screenHeight;
+
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+            $"가상화면: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY}), 이미지: {_capturedScreen.Width}x{_capturedScreen.Height}");
 
         // 배경 이미지 설정
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 시작: {_capturedScreen.Width}x{_capturedScreen.Height}");
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 완료: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}");
-        
         BackgroundImage.Source = bitmapSource;
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"BackgroundImage 설정 완료: {BackgroundImage.Width}x{BackgroundImage.Height}");
 
-        // 창 설정 - 가상 화면 전체를 덮도록 설정 (멀티모니터 지원)
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = _screenX / _dpiScale;
-        Top = _screenY / _dpiScale;
-        Width = _wpfScreenWidth;
-        Height = _wpfScreenHeight;
-        
-        // 창이 화면을 완전히 덮도록 설정
-        WindowState = WindowState.Normal;
-        ResizeMode = ResizeMode.NoResize;
+        // SourceInitialized에서 Win32 API로 창 크기 설정 (WPF DPI 스케일링 우회)
+        SourceInitialized += OnSourceInitialized;
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        // Win32 API로 창 크기/위치 직접 설정 (물리적 픽셀)
+        var hwnd = new WindowInteropHelper(this).Handle;
+        SetWindowPos(hwnd, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+            $"Win32 SetWindowPos: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY})");
     }
 
     /// <summary>
