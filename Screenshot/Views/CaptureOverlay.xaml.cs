@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Forms;
@@ -20,12 +19,6 @@ public partial class CaptureOverlay : Window
     // DPI 관련 Win32 API
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    private const uint SWP_SHOWWINDOW = 0x0040;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -83,54 +76,39 @@ public partial class CaptureOverlay : Window
         // 전달받은 캡처 이미지 저장
         _capturedScreen = capturedScreen;
 
-        // 주 모니터의 DPI 스케일 계산 (WPF 좌표 변환용)
-        var primaryScreen = Screen.PrimaryScreen;
-        if (primaryScreen != null)
+        // DPI 스케일 계산 (WPF는 DIP 단위를 사용)
+        using (var g = Graphics.FromHwnd(IntPtr.Zero))
         {
-            // WPF의 논리적 DPI는 96, 실제 DPI와의 비율 계산
-            using (var g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                _dpiScale = g.DpiX / 96.0;
-            }
+            _dpiScale = g.DpiX / 96.0;
         }
-
-        // WPF 좌표계 크기 = 물리적 픽셀 / DPI 스케일
+        
+        // WPF DIP 크기 = 물리적 픽셀 / DPI 스케일
         _wpfScreenWidth = _screenWidth / _dpiScale;
         _wpfScreenHeight = _screenHeight / _dpiScale;
 
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"가상화면: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY}), 이미지: {_capturedScreen.Width}x{_capturedScreen.Height}, DPI스케일: {_dpiScale}");
-
-        // 배경 이미지 설정 - DPI를 시스템 DPI에 맞춰 생성
-        var systemDpi = _dpiScale * 96;
-        var bitmapSource = ConvertToBitmapSourceWithDpi(_capturedScreen, systemDpi, systemDpi);
-
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"BitmapSource 생성: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}, DPI: {bitmapSource.DpiX}x{bitmapSource.DpiY}");
-
+        // 배경 이미지 설정
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 시작: {_capturedScreen.Width}x{_capturedScreen.Height}");
+        var bitmapSource = ConvertToBitmapSource(_capturedScreen);
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 완료: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}");
+        
         BackgroundImage.Source = bitmapSource;
-        // Width/Height를 지정하지 않으면 WPF가 DPI에 맞춰 자동 크기 조정
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"BackgroundImage 설정 완료: {BackgroundImage.Width}x{BackgroundImage.Height}");
 
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"BackgroundImage 설정: Width={BackgroundImage.Width}, Height={BackgroundImage.Height}, WPF좌표: {_wpfScreenWidth}x{_wpfScreenHeight}");
-
-        // SourceInitialized에서 Win32 API로 창 크기 설정 (WPF DPI 스케일링 우회)
-        SourceInitialized += OnSourceInitialized;
+        // 창 설정 - 가상 화면 전체를 덮도록 설정 (멀티모니터 지원)
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = _screenX / _dpiScale;
+        Top = _screenY / _dpiScale;
+        Width = _wpfScreenWidth;
+        Height = _wpfScreenHeight;
+        
+        // 창이 화면을 완전히 덮도록 설정
+        WindowState = WindowState.Normal;
+        ResizeMode = ResizeMode.NoResize;
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
-    }
-
-    private void OnSourceInitialized(object? sender, EventArgs e)
-    {
-        // Win32 API로 창 크기/위치 직접 설정 (물리적 픽셀)
-        var hwnd = new WindowInteropHelper(this).Handle;
-        SetWindowPos(hwnd, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
-
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"Win32 SetWindowPos: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY})");
     }
 
     /// <summary>
@@ -282,41 +260,29 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        return ConvertToBitmapSourceWithDpi(bitmap, 96, 96);
-    }
+        // MemoryStream 방식 - 가장 안정적
+        var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        ms.Position = 0;
 
-    private BitmapSource ConvertToBitmapSourceWithDpi(System.Drawing.Bitmap bitmap, double dpiX, double dpiY)
-    {
-        var bitmapData = bitmap.LockBits(
-            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-            System.Drawing.Imaging.ImageLockMode.ReadOnly,
-            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-        try
-        {
-            var source = System.Windows.Media.Imaging.BitmapSource.Create(
-                bitmap.Width, bitmap.Height,
-                dpiX, dpiY,
-                System.Windows.Media.PixelFormats.Bgra32,
-                null,
-                bitmapData.Scan0,
-                bitmapData.Stride * bitmap.Height,
-                bitmapData.Stride);
-
-            source.Freeze();
-            return source;
-        }
-        finally
-        {
-            bitmap.UnlockBits(bitmapData);
-        }
+        var bitmapImage = new BitmapImage();
+        bitmapImage.BeginInit();
+        bitmapImage.StreamSource = ms;
+        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+        bitmapImage.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+        bitmapImage.EndInit();
+        
+        // 로드 완료 대기
+        bitmapImage.Freeze();
+        
+        // 스트림은 Freeze 후에 닫음
+        ms.Dispose();
+        
+        return bitmapImage;
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        // 모든 키 이벤트를 처리 완료로 표시 (전역 핫키 방지)
-        e.Handled = true;
-
         if (e.Key == Key.Escape)
         {
             DialogResult = false;
