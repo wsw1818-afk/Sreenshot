@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Forms;
@@ -20,12 +19,6 @@ public partial class CaptureOverlay : Window
     // DPI 관련 Win32 API
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    private const uint SWP_SHOWWINDOW = 0x0040;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -83,39 +76,39 @@ public partial class CaptureOverlay : Window
         // 전달받은 캡처 이미지 저장
         _capturedScreen = capturedScreen;
 
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"가상화면: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY}), 이미지: {_capturedScreen.Width}x{_capturedScreen.Height}");
+        // DPI 스케일 계산 (WPF는 DIP 단위를 사용)
+        using (var g = Graphics.FromHwnd(IntPtr.Zero))
+        {
+            _dpiScale = g.DpiX / 96.0;
+        }
+        
+        // WPF DIP 크기 = 물리적 픽셀 / DPI 스케일
+        _wpfScreenWidth = _screenWidth / _dpiScale;
+        _wpfScreenHeight = _screenHeight / _dpiScale;
 
         // 배경 이미지 설정
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 시작: {_capturedScreen.Width}x{_capturedScreen.Height}");
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"이미지 변환 완료: {bitmapSource.PixelWidth}x{bitmapSource.PixelHeight}");
+        
         BackgroundImage.Source = bitmapSource;
+        BackgroundImage.Width = _wpfScreenWidth;
+        BackgroundImage.Height = _wpfScreenHeight;
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"BackgroundImage 설정 완료: {BackgroundImage.Width}x{BackgroundImage.Height}");
 
-        // SourceInitialized에서 DPI 확인 후 크기 조정
-        SourceInitialized += OnSourceInitialized;
+        // 창 설정 - 가상 화면 전체를 덮도록 설정 (멀티모니터 지원)
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = _screenX / _dpiScale;
+        Top = _screenY / _dpiScale;
+        Width = _wpfScreenWidth;
+        Height = _wpfScreenHeight;
+        
+        // 창이 화면을 완전히 덮도록 설정
+        WindowState = WindowState.Normal;
+        ResizeMode = ResizeMode.NoResize;
 
         // 마우스 이동 이벤트로 십자선 업데이트
         MouseMove += UpdateCrosshair;
-    }
-
-    private void OnSourceInitialized(object? sender, EventArgs e)
-    {
-        // DPI 스케일 1.0 고정 (물리적 픽셀 사용)
-        _dpiScale = 1.0;
-
-        // 물리적 픽셀 크기 그대로 사용
-        _wpfScreenWidth = _screenWidth;
-        _wpfScreenHeight = _screenHeight;
-
-        // 배경 이미지 크기 설정 (물리적 픽셀)
-        BackgroundImage.Width = _wpfScreenWidth;
-        BackgroundImage.Height = _wpfScreenHeight;
-
-        // Win32 API로 창 크기/위치 직접 설정 (WPF DPI 스케일링 우회)
-        var hwnd = new WindowInteropHelper(this).Handle;
-        SetWindowPos(hwnd, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
-
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"Win32 SetWindowPos: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY})");
     }
 
     /// <summary>
@@ -267,61 +260,25 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        // WriteableBitmap으로 96 DPI 강제 설정 (1:1 픽셀 매핑)
-        var bitmapData = bitmap.LockBits(
-            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-            ImageLockMode.ReadOnly,
-            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        // MemoryStream 방식 - 가장 안정적
+        var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        ms.Position = 0;
 
-        try
-        {
-            var writeableBitmap = new WriteableBitmap(
-                bitmap.Width,
-                bitmap.Height,
-                96, 96,  // 96 DPI 고정
-                PixelFormats.Bgra32,
-                null);
-
-            writeableBitmap.Lock();
-            try
-            {
-                // 직접 메모리 복사
-                var sourcePtr = bitmapData.Scan0;
-                var destPtr = writeableBitmap.BackBuffer;
-                var stride = bitmapData.Stride;
-                var height = bitmap.Height;
-
-                for (int y = 0; y < height; y++)
-                {
-                    var sourceRow = sourcePtr + y * stride;
-                    var destRow = destPtr + y * writeableBitmap.BackBufferStride;
-                    unsafe
-                    {
-                        Buffer.MemoryCopy(
-                            (void*)sourceRow,
-                            (void*)destRow,
-                            writeableBitmap.BackBufferStride,
-                            Math.Min(stride, writeableBitmap.BackBufferStride));
-                    }
-                }
-
-                writeableBitmap.AddDirtyRect(new Int32Rect(0, 0, bitmap.Width, bitmap.Height));
-            }
-            finally
-            {
-                writeableBitmap.Unlock();
-            }
-
-            Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-                $"BitmapSource 생성: {writeableBitmap.PixelWidth}x{writeableBitmap.PixelHeight}, DPI: {writeableBitmap.DpiX}x{writeableBitmap.DpiY}");
-
-            writeableBitmap.Freeze();
-            return writeableBitmap;
-        }
-        finally
-        {
-            bitmap.UnlockBits(bitmapData);
-        }
+        var bitmapImage = new BitmapImage();
+        bitmapImage.BeginInit();
+        bitmapImage.StreamSource = ms;
+        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+        bitmapImage.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+        bitmapImage.EndInit();
+        
+        // 로드 완료 대기
+        bitmapImage.Freeze();
+        
+        // 스트림은 Freeze 후에 닫음
+        ms.Dispose();
+        
+        return bitmapImage;
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)

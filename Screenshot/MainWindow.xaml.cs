@@ -168,8 +168,9 @@ public partial class MainWindow : Window
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨기기");
             Hide();
 
-            // DWM이 창을 완전히 숨길 시간
-            await Task.Delay(300);
+            // DWM이 창을 완전히 숨기고 화면을 갱신할 시간 (듀얼 모니터에서는 더 길게 필요)
+            await Task.Delay(500);
+            DwmFlush(); // DWM이 모든 창을 다 그릴 때까지 대기
 
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, CopyFromScreen으로 가상화면 전체 캡처");
 

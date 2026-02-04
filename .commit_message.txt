@@ -1,1 +1,1 @@
-🐛 버그 수정: 멀티모니터 영역 캡처 검은 화면 문제 해결 (96 DPI 강제 + WriteableBitmap)
+🔙 롤백: 영역 캡처 이전 작동 버전으로 복원 (PerMonitorV2 + MemoryStream 방식)
