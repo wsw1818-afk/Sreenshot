@@ -93,31 +93,26 @@ public partial class CaptureOverlay : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        // WPF 창의 실제 DPI 스케일 가져오기
-        var source = PresentationSource.FromVisual(this);
-        if (source?.CompositionTarget != null)
-        {
-            _dpiScale = source.CompositionTarget.TransformToDevice.M11;
-        }
-        else
-        {
-            _dpiScale = 1.0;
-        }
+        // System DPI Aware 모드: DPI 스케일 1.0 고정
+        // (app.manifest에서 dpiAwareness=system으로 설정됨)
+        // 멀티모니터에서 각 모니터의 DPI가 달라도 물리적 픽셀 그대로 사용
+        _dpiScale = 1.0;
 
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay", $"WPF DPI Scale: {_dpiScale}");
+        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+            $"System DPI Aware 모드: 물리적 픽셀 사용, 가상화면: {_screenWidth}x{_screenHeight}");
 
-        // WPF DIP 크기 = 물리적 픽셀 / DPI 스케일
-        _wpfScreenWidth = _screenWidth / _dpiScale;
-        _wpfScreenHeight = _screenHeight / _dpiScale;
+        // 물리적 픽셀 크기 그대로 사용
+        _wpfScreenWidth = _screenWidth;
+        _wpfScreenHeight = _screenHeight;
 
-        // 배경 이미지 크기 설정 (WPF DIP 단위)
+        // 배경 이미지 크기 설정 (물리적 픽셀)
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
 
-        // 창 크기 및 위치 설정 (WPF DIP 단위)
+        // 창 크기 및 위치 설정 (물리적 픽셀)
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = _screenX / _dpiScale;
-        Top = _screenY / _dpiScale;
+        Left = _screenX;
+        Top = _screenY;
         Width = _wpfScreenWidth;
         Height = _wpfScreenHeight;
 
