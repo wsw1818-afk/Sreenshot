@@ -21,6 +21,12 @@ public partial class CaptureOverlay : Window
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
     {
@@ -93,13 +99,8 @@ public partial class CaptureOverlay : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        // System DPI Aware 모드: DPI 스케일 1.0 고정
-        // (app.manifest에서 dpiAwareness=system으로 설정됨)
-        // 멀티모니터에서 각 모니터의 DPI가 달라도 물리적 픽셀 그대로 사용
+        // DPI 스케일 1.0 고정 (물리적 픽셀 사용)
         _dpiScale = 1.0;
-
-        Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"System DPI Aware 모드: 물리적 픽셀 사용, 가상화면: {_screenWidth}x{_screenHeight}");
 
         // 물리적 픽셀 크기 그대로 사용
         _wpfScreenWidth = _screenWidth;
@@ -109,19 +110,12 @@ public partial class CaptureOverlay : Window
         BackgroundImage.Width = _wpfScreenWidth;
         BackgroundImage.Height = _wpfScreenHeight;
 
-        // 창 크기 및 위치 설정 (물리적 픽셀)
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = _screenX;
-        Top = _screenY;
-        Width = _wpfScreenWidth;
-        Height = _wpfScreenHeight;
-
-        // 창이 화면을 완전히 덮도록 설정
-        WindowState = WindowState.Normal;
-        ResizeMode = ResizeMode.NoResize;
+        // Win32 API로 창 크기/위치 직접 설정 (WPF DPI 스케일링 우회)
+        var hwnd = new WindowInteropHelper(this).Handle;
+        SetWindowPos(hwnd, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
 
         Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
-            $"창 설정: {Width}x{Height} @ ({Left},{Top}), 이미지: {BackgroundImage.Width}x{BackgroundImage.Height}");
+            $"Win32 SetWindowPos: {_screenWidth}x{_screenHeight} @ ({_screenX},{_screenY})");
     }
 
     /// <summary>
