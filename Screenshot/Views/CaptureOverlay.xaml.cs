@@ -267,27 +267,25 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        // BitmapData로 직접 복사 (DPI를 96으로 고정하여 WPF 스케일링 방지)
+        // WriteableBitmap으로 96 DPI 강제 설정 (1:1 픽셀 매핑)
         var bitmapData = bitmap.LockBits(
-            new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
             ImageLockMode.ReadOnly,
             System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 
         try
         {
-            // DPI 96으로 고정 - WPF가 스케일링하지 않음
-            var writeableBitmap = new System.Windows.Media.Imaging.WriteableBitmap(
+            var writeableBitmap = new WriteableBitmap(
                 bitmap.Width,
                 bitmap.Height,
-                96, // DPI X - 96으로 고정
-                96, // DPI Y - 96으로 고정
+                96, 96,  // 96 DPI 고정
                 PixelFormats.Bgra32,
                 null);
 
             writeableBitmap.Lock();
             try
             {
-                // 픽셀 데이터 직접 복사
+                // 직접 메모리 복사
                 var sourcePtr = bitmapData.Scan0;
                 var destPtr = writeableBitmap.BackBuffer;
                 var stride = bitmapData.Stride;
@@ -295,13 +293,15 @@ public partial class CaptureOverlay : Window
 
                 for (int y = 0; y < height; y++)
                 {
+                    var sourceRow = sourcePtr + y * stride;
+                    var destRow = destPtr + y * writeableBitmap.BackBufferStride;
                     unsafe
                     {
                         Buffer.MemoryCopy(
-                            (void*)(sourcePtr + y * stride),
-                            (void*)(destPtr + y * writeableBitmap.BackBufferStride),
+                            (void*)sourceRow,
+                            (void*)destRow,
                             writeableBitmap.BackBufferStride,
-                            stride);
+                            Math.Min(stride, writeableBitmap.BackBufferStride));
                     }
                 }
 
@@ -311,6 +311,9 @@ public partial class CaptureOverlay : Window
             {
                 writeableBitmap.Unlock();
             }
+
+            Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+                $"BitmapSource 생성: {writeableBitmap.PixelWidth}x{writeableBitmap.PixelHeight}, DPI: {writeableBitmap.DpiX}x{writeableBitmap.DpiY}");
 
             writeableBitmap.Freeze();
             return writeableBitmap;
