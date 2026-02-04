@@ -173,9 +173,9 @@ public partial class MainWindow : Window
 
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, DXGI로 캡처 시작");
 
-            // DXGI 사용 (CaptureManager를 통해)
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureManager.CaptureFullScreenAsync() 호출");
-            var captureResult = await _captureManager.CaptureFullScreenAsync();
+            // DXGI 사용 (CaptureManager를 통해 - 이벤트 없이)
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureManager.CaptureFullScreenRawAsync() 호출");
+            var captureResult = await _captureManager.CaptureFullScreenRawAsync();
             System.Drawing.Bitmap? capturedScreen = captureResult.Success ? captureResult.Image : null;
             
             if (capturedScreen != null)

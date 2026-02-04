@@ -62,6 +62,15 @@ public class CaptureManager : IDisposable
         return await Task.Run(() => ExecuteCapture(e => e.CaptureFullScreen(), "FullScreen"));
     }
 
+    /// <summary>
+    /// 이벤트 없이 전체 화면 캡처 (영역 선택용)
+    /// </summary>
+    public async Task<CaptureResult> CaptureFullScreenRawAsync()
+    {
+        CaptureLogger.Info("Capture", "=== 전체 화면 캡처 (Raw, 이벤트 없음) ===");
+        return await Task.Run(() => ExecuteCaptureRaw(e => e.CaptureFullScreen(), "FullScreen"));
+    }
+
     public async Task<CaptureResult> CaptureMonitorAsync(int monitorIndex)
     {
         CaptureLogger.Info("Capture", $"=== 모니터 {monitorIndex} ===");
@@ -227,12 +236,55 @@ public class CaptureManager : IDisposable
         StatusChanged?.Invoke(this, "캡처 실패");
         var errorMsg = "모든 캡처 방법 실패:\n" + string.Join("\n", errors);
         CaptureLogger.Error("Capture", $"실패 ({sw.ElapsedMilliseconds}ms): {errorMsg}");
-        
+
         return new CaptureResult
         {
             Success = false,
             EngineName = "None",
             ErrorMessage = errorMsg
+        };
+    }
+
+    /// <summary>
+    /// 이벤트 없이 캡처 실행 (영역 선택용 - ProcessCaptureResult 호출 안함)
+    /// </summary>
+    private CaptureResult ExecuteCaptureRaw(Func<ICaptureEngine, CaptureResult> captureFunc, string mode)
+    {
+        var sw = Stopwatch.StartNew();
+
+        foreach (var engine in _engines.Where(e => e.IsAvailable))
+        {
+            CaptureLogger.LogCaptureAttempt(engine.Name, mode + " (Raw)", null);
+
+            try
+            {
+                var result = captureFunc(engine);
+
+                if (result.Success && result.Image != null && !IsBlackImage(result.Image))
+                {
+                    sw.Stop();
+                    CaptureLogger.Info("Capture", $"Raw 성공 ({engine.Name}, {sw.ElapsedMilliseconds}ms)");
+                    // ProcessCaptureResult 호출하지 않음 - 이벤트 발생 안함
+                    return result;
+                }
+
+                if (result.Image != null)
+                {
+                    result.Image.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", $"[{engine.Name}] Raw 예외", ex);
+            }
+        }
+
+        sw.Stop();
+        return new CaptureResult
+        {
+            Success = false,
+            EngineName = "None",
+            ErrorMessage = "모든 캡처 방법 실패 (Raw)"
         };
     }
 
