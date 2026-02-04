@@ -164,20 +164,19 @@ public partial class MainWindow : Window
 
         try
         {
-            // 창 숨기기 (DXGI는 창 위치와 무관하게 데스크톱 직접 캡처)
+            // 창 숨기기
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨기기");
             Hide();
 
             // DWM이 창을 완전히 숨길 시간
             await Task.Delay(300);
 
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, DXGI로 캡처 시작");
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, CopyFromScreen으로 가상화면 전체 캡처");
 
-            // DXGI 사용 (CaptureManager를 통해 - 이벤트 없이)
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureManager.CaptureFullScreenRawAsync() 호출 (이벤트 없음)");
-            var captureResult = await _captureManager.CaptureFullScreenRawAsync();
-            System.Drawing.Bitmap? capturedScreen = captureResult.Success ? captureResult.Image : null;
-            
+            // CopyFromScreen 사용 (DXGI는 단일 모니터만 캡처하므로 멀티모니터에서 문제)
+            // CaptureScreenDirect는 VirtualScreen 전체를 캡처함
+            System.Drawing.Bitmap? capturedScreen = await Task.Run(() => CaptureScreenDirect());
+
             if (capturedScreen != null)
             {
                 Services.Capture.CaptureLogger.DebugLog("RegionCapture", $"캡처 성공: {capturedScreen.Width}x{capturedScreen.Height}");
