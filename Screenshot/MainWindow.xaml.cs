@@ -76,10 +76,11 @@ public partial class MainWindow : Window
         if (_settings.EnableGlobalHotkeys)
         {
             _hotkeyService.Initialize(this);
-            _hotkeyService.FullScreenCapture += () => SafeExecuteAsync(CaptureFullScreenAsync);
-            _hotkeyService.RegionCapture += () => SafeExecuteAsync(CaptureRegionAsync);
-            _hotkeyService.DelayedCapture += () => SafeExecuteAsync(CaptureDelayedAsync);
-            _hotkeyService.WindowCapture += () => SafeExecuteAsync(CaptureWindowAsync);
+            // 캡처 중에는 핫키 무시 (_isCapturing 체크)
+            _hotkeyService.FullScreenCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureFullScreenAsync); };
+            _hotkeyService.RegionCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureRegionAsync); };
+            _hotkeyService.DelayedCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureDelayedAsync); };
+            _hotkeyService.WindowCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureWindowAsync); };
 
             if (_hotkeyService.RegisterHotkeys())
             {

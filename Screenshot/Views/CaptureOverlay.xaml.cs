@@ -286,6 +286,9 @@ public partial class CaptureOverlay : Window
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        // 모든 키 이벤트를 처리 완료로 표시 (전역 핫키 방지)
+        e.Handled = true;
+
         if (e.Key == Key.Escape)
         {
             DialogResult = false;
