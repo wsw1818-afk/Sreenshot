@@ -174,8 +174,8 @@ public partial class MainWindow : Window
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, CopyFromScreen으로 가상화면 전체 캡처");
 
             // CopyFromScreen 사용 (DXGI는 단일 모니터만 캡처하므로 멀티모니터에서 문제)
-            // CaptureScreenDirect는 VirtualScreen 전체를 캡처함
-            System.Drawing.Bitmap? capturedScreen = await Task.Run(() => CaptureScreenDirect());
+            // 영역 캡처에서는 검은 화면 감지 건너뜀 (확장 모니터가 검은 배경일 수 있음)
+            System.Drawing.Bitmap? capturedScreen = await Task.Run(() => CaptureScreenForRegion());
 
             if (capturedScreen != null)
             {
@@ -1179,24 +1179,34 @@ public partial class MainWindow : Window
     private const uint SRCCOPY = 0x00CC0020;
     private const uint CAPTUREBLT = 0x40000000;
 
+    /// <summary>
+    /// 영역 캡처용 - 검은 화면 감지 없이 바로 캡처
+    /// (확장 모니터가 검은 배경일 수 있으므로 검증 생략)
+    /// </summary>
+    private static System.Drawing.Bitmap? CaptureScreenForRegion()
+    {
+        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenForRegion] CopyFromScreen (검은 화면 검사 없음)");
+        return CaptureScreenWithCopyFromScreen();
+    }
+
     private static System.Drawing.Bitmap? CaptureScreenDirect()
     {
         Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenDirect] CopyFromScreen 사용 (재시도 포함)");
-        
+
         // 검은 화면 감지 및 최대 3회 재시도
         for (int attempt = 1; attempt <= 3; attempt++)
         {
             Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 시도 {attempt}/3");
-            
+
             var bitmap = CaptureScreenWithCopyFromScreen();
-            
+
             if (bitmap == null)
             {
                 Services.Capture.CaptureLogger.Warn("MainWindow", $"[CaptureScreenDirect] 시도 {attempt} 실패: null 반환");
                 if (attempt < 3) Thread.Sleep(200 * attempt);
                 continue;
             }
-            
+
             // 검은 화면 체크
             if (IsBlackImage(bitmap))
             {
@@ -1205,11 +1215,11 @@ public partial class MainWindow : Window
                 if (attempt < 3) Thread.Sleep(300 * attempt);
                 continue;
             }
-            
+
             Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 성공 (시도 {attempt}): {bitmap.Width}x{bitmap.Height}");
             return bitmap;
         }
-        
+
         Services.Capture.CaptureLogger.Error("MainWindow", "[CaptureScreenDirect] 3회 시도 후 실패");
         return null;
     }
