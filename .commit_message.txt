@@ -1,1 +1,1 @@
-🐛 버그 수정: 캡처 중복 방지 - 핫키 이벤트에서 _isCapturing 체크 추가
+🐛 버그 수정: 영역 캡처 DPI 스케일링 - WriteableBitmap + 96 DPI 명시 설정

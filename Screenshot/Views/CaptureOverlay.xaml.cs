@@ -263,25 +263,31 @@ public partial class CaptureOverlay : Window
 
     private BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
     {
-        // MemoryStream 방식 - 가장 안정적
-        var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
-        ms.Position = 0;
+        // WriteableBitmap 방식 - DPI를 명시적으로 96으로 설정하여 스케일링 방지
+        var bitmapData = bitmap.LockBits(
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 
-        var bitmapImage = new BitmapImage();
-        bitmapImage.BeginInit();
-        bitmapImage.StreamSource = ms;
-        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
-        bitmapImage.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
-        bitmapImage.EndInit();
-        
-        // 로드 완료 대기
-        bitmapImage.Freeze();
-        
-        // 스트림은 Freeze 후에 닫음
-        ms.Dispose();
-        
-        return bitmapImage;
+        try
+        {
+            // 96 DPI로 명시적 설정 (WPF DPI 스케일링 우회)
+            var source = System.Windows.Media.Imaging.BitmapSource.Create(
+                bitmap.Width, bitmap.Height,
+                96, 96,  // DPI를 96으로 고정
+                System.Windows.Media.PixelFormats.Bgra32,
+                null,
+                bitmapData.Scan0,
+                bitmapData.Stride * bitmap.Height,
+                bitmapData.Stride);
+
+            source.Freeze();
+            return source;
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
