@@ -39,31 +39,38 @@
 
 ### 2026-02-03
 
-#### 1. 영역 선택 캡처 개선
-**문제**: `Visibility = Collapsed` 상태에서 `CopyFromScreen`이 검은 화면 반환
+#### 1. 영역 선택 캡처 검은 화면 문제 해결
+**문제**: 영역 선택 캡처 시 검은 화면이 간헐적으로 발생
+
+**원인**: 
+- DWM이 창을 완전히 숨기기 전에 캡처 시도
+- `Opacity = 0.01`만으로는 DWM 캐시에 잔여 화면이 남아있을 수 있음
 
 **해결책**:
 ```csharp
-// Before: Visibility 변경 (실패)
-Visibility = Visibility.Collapsed;
-
-// After: Opacity + 위치 이동 (성공)
-Opacity = 0.01;           // 거의 투명
-Left = -5000;             // 화면 밖
+// Before: 투명도 + 위치 이동만 사용
+Opacity = 0.01;
+Left = -5000;
 Top = -5000;
-await Task.Delay(500);    // DWM 대기
+await Task.Delay(500);
+
+// After: Hide() + Minimized + 더 긴 대기 시간
+Hide();
+WindowState = WindowState.Minimized;
+Opacity = 0;
+Left = -10000;
+Top = -10000;
+await Task.Delay(800);  // DWM 완전 적용 시간 확보
 ```
 
-**코드 위치**: `MainWindow.xaml.cs` - `CaptureRegionAsync()`
+**추가 개선**: `CaptureScreenDirect()`에 검은 화면 감지 및 3회 재시도 로직 추가
 
-#### 2. DXGI 세션 충돌 방지
-**문제**: `DxgiCapture`를 직접 생성하면 세션 충돌 발생
+**코드 위치**: `MainWindow.xaml.cs` - `CaptureRegionAsync()`, `CaptureScreenDirect()`
 
-**해결책**: 영역 선택에서는 `CopyFromScreen`만 사용, 전체 화면에서만 DXGI 사용
-
-#### 3. 저장 로깅 강화
-- 저장 경로 및 성공/실패 로그 추가
-- `CaptureManager.SaveToFile()`에 상세 로깅
+#### 2. 이전 수정사항
+- `Visibility = Collapsed` 상태에서 `CopyFromScreen`이 검은 화면 반환 → `Opacity + 위치 이동`으로 해결
+- DXGI 세션 충돌 방지 → 영역 선택에서는 `CopyFromScreen`만 사용
+- 저장 로깅 강화
 
 ---
 

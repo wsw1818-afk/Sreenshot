@@ -169,16 +169,18 @@ public partial class MainWindow : Window
 
         try
         {
-            // 창을 거의 투명하게 설정하고 화면 밖으로 이동
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창을 투명하게 설정");
-            Opacity = 0.01;  // 거의 투명 (0이 아닌 0.01)
-            Left = -5000;
-            Top = -5000;
+            // 핵심: Hide() 대신 Opacity + 위치 이동 사용
+            // Hide()는 CopyFromScreen에서 검은 화면 유발
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창을 화면 밖으로 이동");
+            Opacity = 0;  // 완전 투명
+            Left = SystemParameters.VirtualScreenWidth + 100;  // 화면 오른쪽 밖
+            Top = SystemParameters.VirtualScreenHeight + 100;  // 화면 아래쪽 밖
             
-            // UI 갱신 및 DWM 대기
+            // DWM이 창 위치를 적용할 시간
             await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-            await Task.Delay(500);  // 500ms로 증가
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "DWM 대기 완료");
+            await Task.Delay(400);
+            
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 이동 완료, 캡처 시작");
 
             // 안전한 방법: CopyFromScreen만 사용 (DXGI는 충돌 위험)
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CopyFromScreen으로 화면 캡처");
@@ -293,10 +295,11 @@ public partial class MainWindow : Window
         }
         finally
         {
-            // 위치 및 투명도 복원
+            // 창 복원 (Opacity 먼저 복원하고 위치 이동)
             Left = originalLeft;
             Top = originalTop;
             Opacity = originalOpacity;
+            
             _isCapturing = false;
         }
     }
@@ -1197,21 +1200,37 @@ public partial class MainWindow : Window
 
     private static System.Drawing.Bitmap? CaptureScreenDirect()
     {
-        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenDirect] CopyFromScreen 사용");
+        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenDirect] CopyFromScreen 사용 (재시도 포함)");
         
-        // Windows 11에서 BitBlt는 검은 화면 반환 문제가 있어 CopyFromScreen만 사용
-        var bitmap = CaptureScreenWithCopyFromScreen();
-        
-        if (bitmap != null)
+        // 검은 화면 감지 및 최대 3회 재시도
+        for (int attempt = 1; attempt <= 3; attempt++)
         {
-            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 성공: {bitmap.Width}x{bitmap.Height}");
-        }
-        else
-        {
-            Services.Capture.CaptureLogger.Error("MainWindow", "[CaptureScreenDirect] CopyFromScreen 실패");
+            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 시도 {attempt}/3");
+            
+            var bitmap = CaptureScreenWithCopyFromScreen();
+            
+            if (bitmap == null)
+            {
+                Services.Capture.CaptureLogger.Warn("MainWindow", $"[CaptureScreenDirect] 시도 {attempt} 실패: null 반환");
+                if (attempt < 3) Thread.Sleep(200 * attempt);
+                continue;
+            }
+            
+            // 검은 화면 체크
+            if (IsBlackImage(bitmap))
+            {
+                Services.Capture.CaptureLogger.Warn("MainWindow", $"[CaptureScreenDirect] 시도 {attempt}: 검은 화면 감지, 재시도...");
+                bitmap.Dispose();
+                if (attempt < 3) Thread.Sleep(300 * attempt);
+                continue;
+            }
+            
+            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 성공 (시도 {attempt}): {bitmap.Width}x{bitmap.Height}");
+            return bitmap;
         }
         
-        return bitmap;
+        Services.Capture.CaptureLogger.Error("MainWindow", "[CaptureScreenDirect] 3회 시도 후 실패");
+        return null;
     }
 
     private static System.Drawing.Bitmap? CaptureScreenWithCopyFromScreen()
