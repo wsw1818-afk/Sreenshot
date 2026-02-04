@@ -195,6 +195,18 @@ public partial class MainWindow : Window
             if (capturedScreen != null)
             {
                 Services.Capture.CaptureLogger.DebugLog("RegionCapture", $"캡처 성공: {capturedScreen.Width}x{capturedScreen.Height}");
+
+                // 디버그: 캡처된 이미지를 파일로 저장하여 확인
+                var debugPath = Path.Combine(_settings.SaveFolder, $"debug_capture_{DateTime.Now:HHmmss}.png");
+                try
+                {
+                    capturedScreen.Save(debugPath, ImageFormat.Png);
+                    Services.Capture.CaptureLogger.Info("RegionCapture", $"디버그 이미지 저장: {debugPath}");
+                }
+                catch (Exception ex)
+                {
+                    Services.Capture.CaptureLogger.Error("RegionCapture", $"디버그 이미지 저장 실패: {ex.Message}");
+                }
             }
             else
             {
