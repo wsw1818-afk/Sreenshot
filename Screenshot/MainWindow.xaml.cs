@@ -162,29 +162,21 @@ public partial class MainWindow : Window
         _isCapturing = true;
         Services.Capture.CaptureLogger.DebugLog("RegionCapture", "_isCapturing=true 설정됨");
 
-        // 원래 위치 및 투명도 저장
-        var originalLeft = Left;
-        var originalTop = Top;
-        var originalOpacity = Opacity;
-
         try
         {
-            // 핵심: Hide() 대신 Opacity + 위치 이동 사용
-            // Hide()는 CopyFromScreen에서 검은 화면 유발
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창을 화면 밖으로 이동");
-            Opacity = 0;  // 완전 투명
-            Left = SystemParameters.VirtualScreenWidth + 100;  // 화면 오른쪽 밖
-            Top = SystemParameters.VirtualScreenHeight + 100;  // 화면 아래쪽 밖
-            
-            // DWM이 창 위치를 적용할 시간
-            await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-            await Task.Delay(400);
-            
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 이동 완료, 캡처 시작");
+            // 창 숨기기 (DXGI는 창 위치와 무관하게 데스크톱 직접 캡처)
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨기기");
+            Hide();
 
-            // 안전한 방법: CopyFromScreen만 사용 (DXGI는 충돌 위험)
-            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CopyFromScreen으로 화면 캡처");
-            System.Drawing.Bitmap? capturedScreen = CaptureScreenDirect();
+            // DWM이 창을 완전히 숨길 시간
+            await Task.Delay(300);
+
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "창 숨김 완료, DXGI로 캡처 시작");
+
+            // DXGI 사용 (CaptureManager를 통해)
+            Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureManager.CaptureFullScreenAsync() 호출");
+            var captureResult = await _captureManager.CaptureFullScreenAsync();
+            System.Drawing.Bitmap? capturedScreen = captureResult.Success ? captureResult.Image : null;
             
             if (capturedScreen != null)
             {
@@ -211,11 +203,6 @@ public partial class MainWindow : Window
             
             Services.Capture.CaptureLogger.DebugLog("RegionCapture", "CaptureScreen 완료, Overlay 생성 중...");
             System.Diagnostics.Debug.WriteLine("[RegionCapture] CaptureOverlay 생성 중...");
-
-            // 오버레이 표시 전에 MainWindow 위치/투명도 복원 (오버레이와 충돌 방지)
-            Left = originalLeft;
-            Top = originalTop;
-            Opacity = originalOpacity;
 
             CaptureOverlay overlay;
             try
@@ -295,11 +282,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            // 창 복원 (Opacity 먼저 복원하고 위치 이동)
-            Left = originalLeft;
-            Top = originalTop;
-            Opacity = originalOpacity;
-            
             _isCapturing = false;
         }
     }
