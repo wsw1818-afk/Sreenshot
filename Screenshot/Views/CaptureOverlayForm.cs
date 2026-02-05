@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace Screenshot.Views;
@@ -10,6 +11,18 @@ namespace Screenshot.Views;
 /// </summary>
 public class CaptureOverlayForm : Form
 {
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
     private Point _startPoint;
     private Point _currentPoint;
     private bool _isSelecting;
@@ -57,15 +70,10 @@ public class CaptureOverlayForm : Form
         // Form 설정
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
-        Location = new Point(_screenX, _screenY);
-        ClientSize = new Size(_screenWidth, _screenHeight);
         TopMost = true;
         ShowInTaskbar = false;
         Cursor = Cursors.Cross;
         DoubleBuffered = true;
-
-        // BackgroundImage 사용하지 않음 - Paint에서 직접 그려서 선명하게 표시
-        // (Stretch 모드의 보간법으로 인한 뿌옇게 보이는 문제 방지)
 
         // 이벤트 핸들러
         KeyDown += OnKeyDown;
@@ -74,8 +82,19 @@ public class CaptureOverlayForm : Form
         MouseUp += OnMouseUp;
         Paint += OnPaint;
 
+        // Shown 이벤트에서 Win32 API로 정확한 물리적 위치/크기 강제 설정
+        Shown += (s, e) =>
+        {
+            SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+
+            GetWindowRect(Handle, out var rect);
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                $"Shown 후 실제 크기: Win32Rect={rect.Left},{rect.Top},{rect.Right - rect.Left}x{rect.Bottom - rect.Top}, " +
+                $"ClientSize={ClientSize.Width}x{ClientSize.Height}, Bounds={Bounds}");
+        };
+
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-            $"WinForms 오버레이 생성: Location={_screenX},{_screenY}, ClientSize={_screenWidth}x{_screenHeight}, BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}");
+            $"WinForms 오버레이 생성: Screen={_screenX},{_screenY},{_screenWidth}x{_screenHeight}, BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}");
     }
 
     /// <summary>
@@ -159,8 +178,12 @@ public class CaptureOverlayForm : Form
         }
 
         // Form 좌표 → 이미지(물리적 픽셀) 좌표 변환
-        double scaleX = (double)_screenWidth / ClientSize.Width;
-        double scaleY = (double)_screenHeight / ClientSize.Height;
+        // Win32 API로 실제 창 크기 가져오기 (DPI 스케일링 무관)
+        GetWindowRect(Handle, out var winRect);
+        int actualW = winRect.Right - winRect.Left;
+        int actualH = winRect.Bottom - winRect.Top;
+        double scaleX = (double)_screenWidth / actualW;
+        double scaleY = (double)_screenHeight / actualH;
 
         int imgX = (int)Math.Round(x * scaleX);
         int imgY = (int)Math.Round(y * scaleY);
