@@ -30,6 +30,7 @@
 | - | CaptureOverlayForm.cs | CaptureScreen() 데드코드 제거 | 이전 |
 | #25 | NotificationService.cs | `Application.Current?.Dispatcher == null` 체크 추가 (3곳) | 현재 |
 | #31 | ImageEditorWindow.xaml.cs | Undo 스택 MaxUndoCount=20 제한 + Redo 스택 Dispose | 현재 |
+| #41 | CaptureOverlayForm.cs | Deactivate 후 포커스 복구(Activate+Focus) + 3회 반복 시 자동 취소 + 30초 안전 타이머 | 현재 |
 
 ### 허위/안전으로 확인된 버그
 
@@ -66,4 +67,4 @@
 ---
 
 ## 다음 할 일
-- 없음 (모든 P0/P1 버그 수정 완료)
+- Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
