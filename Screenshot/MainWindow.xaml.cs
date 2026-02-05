@@ -843,17 +843,7 @@ public partial class MainWindow : Window
     private void OnCaptureCompleted(object? sender, CaptureResult result)
     {
         Services.Capture.CaptureLogger.Info("MainWindow", $"[OnCaptureCompleted] 캡처 완료: {result.EngineName}, SavedPath={result.SavedFilePath}");
-        // CaptureManager에서 이미 저장됨, UI 업데이트만 수행
-        if (result.Success && result.Image != null)
-        {
-            Dispatcher.Invoke(() =>
-            {
-                AddThumbnail(result);
-                StatusText.Text = string.IsNullOrEmpty(result.SavedFilePath) 
-                    ? $"캡처 성공 - {result.EngineName}" 
-                    : $"캡처 저장됨: {Path.GetFileName(result.SavedFilePath)}";
-            });
-        }
+        // HandleCaptureResult에서 썸네일/UI 업데이트를 처리하므로 여기서는 로그만 기록
     }
 
     private void OnStatusChanged(object? sender, string status)
