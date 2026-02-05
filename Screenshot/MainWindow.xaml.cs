@@ -436,12 +436,8 @@ public partial class MainWindow : Window
         {
             if (result.Success && result.Image != null)
             {
-                // 테스트: AutoSave 강제 활성화
-                _settings.AutoSave = true;
-                Services.Capture.CaptureLogger.Info("MainWindow", $"[HandleCaptureResult] AutoSave={_settings.AutoSave}, SaveFolder={_settings.SaveFolder}");
-                
-                // 자동 저장
-                if (_settings.AutoSave)
+                // CaptureManager.ProcessCaptureResult()에서 이미 저장된 경우 중복 저장 방지
+                if (string.IsNullOrEmpty(result.SavedFilePath) && _settings.AutoSave)
                 {
                     var fileName = $"capture_{DateTime.Now:yyyyMMdd_HHmmss}.{_settings.ImageFormat.ToLower()}";
                     var filePath = Path.Combine(_settings.SaveFolder, fileName);
@@ -466,6 +462,10 @@ public partial class MainWindow : Window
                         Services.Capture.CaptureLogger.Error("MainWindow", "[HandleCaptureResult] 저장 실패", ex);
                         Debug.WriteLine($"자동 저장 실패: {ex.Message}");
                     }
+                }
+                else if (!string.IsNullOrEmpty(result.SavedFilePath))
+                {
+                    Services.Capture.CaptureLogger.Info("MainWindow", $"[HandleCaptureResult] 이미 저장됨, 중복 저장 건너뜀: {result.SavedFilePath}");
                 }
 
                 // 히스토리 관리
