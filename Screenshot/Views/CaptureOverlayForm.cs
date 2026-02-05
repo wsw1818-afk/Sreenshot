@@ -44,6 +44,7 @@ public class CaptureOverlayForm : Form
 
     private bool _showHelp = true;
     private bool _inputEnabled;
+    private bool _closingByUser;
 
     // 그리기 리소스
     private readonly Pen _selPen = new(Color.FromArgb(0, 120, 212), 2);
@@ -111,6 +112,36 @@ public class CaptureOverlayForm : Form
         MouseUp += OnMouseUp;
         KeyDown += OnKeyDown;
         Paint += OnPaint;
+
+        // 포커스 상실 시 재활성화 (WPF 앱에서 WinForms 다이얼로그가 포커스를 잃을 수 있음)
+        Deactivate += (s, e) =>
+        {
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Deactivate 발생 - 재활성화 시도");
+            BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed && Visible)
+                {
+                    Activate();
+                    BringToFront();
+                }
+            }));
+        };
+
+        FormClosing += (s, e) =>
+        {
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                $"FormClosing: DialogResult={DialogResult}, CloseReason={e.CloseReason}, ByUser={_closingByUser}");
+            // 사용자가 명시적으로 닫지 않은 경우 (포커스 상실 등) 닫기 차단
+            if (!_closingByUser && e.CloseReason != CloseReason.ApplicationExitCall
+                && e.CloseReason != CloseReason.TaskManagerClosing
+                && e.CloseReason != CloseReason.WindowsShutDown)
+            {
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비정상 닫기 차단됨");
+                e.Cancel = true;
+                Activate();
+                BringToFront();
+            }
+        };
 
         // Shown 이벤트에서 Win32 API로 물리적 크기 강제 + 강제 다시 그리기
         Shown += (s, e) =>
@@ -284,11 +315,13 @@ public class CaptureOverlayForm : Form
     {
         if (e.KeyCode == Keys.Escape)
         {
+            _closingByUser = true;
             DialogResult = DialogResult.Cancel;
             Close();
         }
         else if (e.KeyCode == Keys.Enter)
         {
+            _closingByUser = true;
             _selectedRegion = new Rectangle(_screenX, _screenY, _screenWidth, _screenHeight);
             DialogResult = DialogResult.OK;
             Close();
@@ -350,6 +383,7 @@ public class CaptureOverlayForm : Form
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
             $"선택: Panel({sel.X},{sel.Y},{sel.Width}x{sel.Height}) → Img({imgX},{imgY},{imgW}x{imgH}), Scale={scaleX:F2}x{scaleY:F2}");
 
+        _closingByUser = true;
         DialogResult = DialogResult.OK;
         Close();
     }
