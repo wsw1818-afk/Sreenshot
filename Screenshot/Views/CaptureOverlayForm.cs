@@ -113,8 +113,19 @@ public class CaptureOverlayForm : Form
                     CopyPixelOperation.SourceCopy);
             }
 
-            Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                $"화면 캡처 완료: {result.Width}x{result.Height}");
+            // 디버그: 캡처 원본 저장
+            try
+            {
+                var debugDir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "SmartCapture", "Debug");
+                System.IO.Directory.CreateDirectory(debugDir);
+                var debugPath = System.IO.Path.Combine(debugDir, $"winforms_capture_{DateTime.Now:HHmmss}.png");
+                result.Save(debugPath, ImageFormat.Png);
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                    $"디버그 이미지 저장: {debugPath}, 크기: {result.Width}x{result.Height}");
+            }
+            catch { }
 
             return result;
         }
@@ -204,12 +215,14 @@ public class CaptureOverlayForm : Form
     {
         var g = e.Graphics;
 
-        // 배경 이미지를 직접 그리기 (NearestNeighbor로 선명하게)
+        // 배경 이미지를 1:1 픽셀로 직접 그리기 (보간 없음)
         if (_backgroundBitmap != null)
         {
+            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
             g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-            g.DrawImage(_backgroundBitmap, 0, 0, ClientSize.Width, ClientSize.Height);
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            g.DrawImageUnscaled(_backgroundBitmap, 0, 0);
         }
 
         if (_showHelp)
