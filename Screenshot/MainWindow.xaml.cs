@@ -161,44 +161,24 @@ public partial class MainWindow : Window
 
         try
         {
-            // Hide() 대신 화면 밖 이동 + 투명화 (DWM이 검은 화면을 반환하는 문제 우회)
-            var savedLeft = Left;
-            var savedTop = Top;
-            var savedOpacity = Opacity;
-            Opacity = 0.01;
-            Left = -10000;
-            Top = -10000;
-            await Task.Delay(300);
-            DwmFlush();
-            await Task.Delay(100);
+            Hide();
+            await Task.Delay(200);
 
-            System.Drawing.Bitmap? capturedScreen = null;
+            // DXGI 엔진으로 전체 화면 캡처 (CopyFromScreen이 검은 화면 반환하는 문제 우회)
+            var rawResult = await _captureManager.CaptureFullScreenRawAsync();
+            var capturedScreen = rawResult.Image;
 
-            // 검은 화면 재시도 (최대 3회)
-            for (int attempt = 0; attempt < 3; attempt++)
+            if (capturedScreen == null || !rawResult.Success)
             {
-                capturedScreen = CaptureOverlayForm.CaptureScreen();
-                if (capturedScreen != null && !IsAlmostBlackImage(capturedScreen))
-                    break;
-
-                Services.Capture.CaptureLogger.Warn("MainWindow",
-                    $"[CaptureRegion] 검은 화면 감지, 재시도 {attempt + 1}/3");
-                capturedScreen?.Dispose();
-                capturedScreen = null;
-                await Task.Delay(300);
-                DwmFlush();
-                await Task.Delay(100);
-            }
-            if (capturedScreen == null)
-            {
-                Left = savedLeft;
-                Top = savedTop;
-                Opacity = savedOpacity;
+                Show();
                 StatusText.Text = "화면 캡처 실패";
                 return;
             }
 
-            // WinForms 오버레이 사용 (WPF 블랙스크린 문제 우회)
+            Services.Capture.CaptureLogger.Info("MainWindow",
+                $"[CaptureRegion] DXGI 캡처 성공: {capturedScreen.Width}x{capturedScreen.Height}, Engine={rawResult.EngineName}");
+
+            // WinForms 오버레이 사용
             System.Windows.Forms.DialogResult dialogResult;
             CaptureOverlayForm overlay;
             using (overlay = new CaptureOverlayForm(capturedScreen))
@@ -238,9 +218,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            Left = savedLeft;
-            Top = savedTop;
-            Opacity = savedOpacity;
+            Show();
             InvalidateVisual();
             UpdateLayout();
         }
