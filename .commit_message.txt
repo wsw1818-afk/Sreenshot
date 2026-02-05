@@ -1,1 +1,1 @@
-🐛 버그 수정: 영역 캡처 배경 안 보임 - PictureBox + 투명 SelectionPanel 구조로 전면 재작성
+🐛 버그 수정: 영역 캡처 배경 안 보임 - 단일 Form Paint + 임시파일 로드 방식으로 전면 재작성
