@@ -14,14 +14,14 @@
 |------|------|------|
 | DXGI Hardware 캡처 | ✅ | Desktop Duplication API 사용 |
 | GDI Capture (BitBlt) | ✅ | 폭백용 |
-| CopyFromScreen | ✅ | 영역 선택용 |
+| CopyFromScreen | ❌ | 영역 선택에서 제거 (검은 화면 문제) |
 | 캡처 엔진 캐싱 | ✅ | 30초 캐시, 세션 재사용 |
 
 ### 캡처 모드
 | 모드 | 상태 | 비고 |
 |------|------|------|
 | 전체 화면 캡처 | ✅ | DXGI 사용, 정상 작동 |
-| 영역 선택 캡처 | ✅ | Opacity 0.01 + 화면 밖 이동 |
+| 영역 선택 캡처 | ✅ | DXGI 엔진 + WinForms 오버레이 |
 | 창 캡처 | ✅ | PrintWindow 폭백 |
 | 모니터 캡처 | ✅ | |
 
@@ -201,11 +201,74 @@ if (IsBlackImage(bitmap))
 - 2026-02-03 수정사항에서 이미 검증된 방식
 - 사용자 눈에는 보이지 않으면서 DWM은 정상 동작
 
-### 다음 조치
-- **즉시**: 방안 4 (Opacity 방식)으로 롤백 테스트
-- **단기**: 방안 2 (검은 화면 감지) 추가
-- **장기**: 방안 3 (DXGI 멀티모니터) 구현 검토
+### 최종 해결: 방안 3 (DXGI) 적용 ✅
+- **적용일**: 2026-02-05
+- **방법**: `CopyFromScreen` 완전 제거, `CaptureManager.CaptureFullScreenRawAsync()` (DXGI 엔진) 사용
+- **결과**: 3회 연속 테스트 성공, 검은 화면 없음
 
 ---
 
-**마지막 업데이트**: 2026-02-04
+## 🚨 2026-02-05 - 영역 캡처 검은 화면 문제 최종 해결
+
+### 문제 요약
+영역 캡처 시 오버레이 배경이 검은 화면으로 표시되는 문제.
+2세션에 걸쳐 총 10가지 이상의 접근법을 시도한 후 최종 해결.
+
+### 근본 원인
+**`Graphics.CopyFromScreen()`이 Windows 11 24H2 (Build 26200) 환경에서 항상 검은 화면(Alpha=0 포함)을 반환.**
+
+```
+캡처픽셀(480,300): R=0 G=0 B=0 A=0
+캡처픽셀(960,600): R=0 G=0 B=0 A=0
+BlackPixels=5/5
+```
+
+- `Hide()` + 200ms~800ms 딜레이: 효과 없음
+- `Opacity=0.01` + 화면 밖 이동 + DwmFlush(): 효과 없음
+- 3회 재시도: 효과 없음 (모든 시도에서 동일하게 검은 화면)
+- **CopyFromScreen 자체가 이 환경에서 작동하지 않음**
+
+### 시도한 접근법 (시간순)
+
+| # | 접근법 | 결과 |
+|---|--------|------|
+| 1 | WPF Image + BitmapSource | ❌ 검은 화면 |
+| 2 | WPF WriteableBitmap | ❌ 검은 화면 |
+| 3 | WPF DrawingVisual | ❌ 검은 화면 |
+| 4 | WinForms BackgroundImage | ❌ 회색 화면 |
+| 5 | WinForms Paint + DrawImage | ❌ 회색 화면 |
+| 6 | WinForms Paint + DrawImageUnscaled + SetResolution(96) | ❌ 회색 화면 |
+| 7 | WinForms PictureBox + 투명 SelectionPanel | ❌ 검은 화면 |
+| 8 | WinForms 단일 Form Paint + 임시파일 로드 | ❌ 검은 화면 |
+| 9 | Opacity=0.01 + 화면 밖 이동 + DwmFlush + 3회 재시도 | ❌ 검은 화면 |
+| **10** | **DXGI Desktop Duplication API** | **✅ 성공** |
+
+### 핵심 진단 과정
+
+1. **픽셀 샘플링 추가** → CopyFromScreen이 R=0 G=0 B=0 A=0 반환 확인
+2. **Alpha=0** 발견 → 일반적 CopyFromScreen은 A=255 반환해야 함 → DWM 컴포지션 문제 확정
+3. **전체 화면 캡처(DXGI)는 정상** → DXGI 엔진을 영역 캡처에도 적용
+
+### 최종 해결책
+
+```csharp
+// Before: CopyFromScreen (검은 화면)
+var capturedScreen = CaptureOverlayForm.CaptureScreen(); // GDI CopyFromScreen
+
+// After: DXGI Desktop Duplication API (정상)
+var rawResult = await _captureManager.CaptureFullScreenRawAsync(); // DXGI 엔진
+var capturedScreen = rawResult.Image;
+```
+
+**변경 파일:**
+- `MainWindow.xaml.cs` → `CaptureRegionAsync()`: CopyFromScreen → DXGI 엔진
+- `CaptureOverlayForm.cs` → 단일 Form Paint 방식으로 간소화 (임시파일 로드 + 더블버퍼링)
+
+### 교훈
+1. **CopyFromScreen은 Windows 11 24H2+에서 신뢰할 수 없음** → DXGI 사용 권장
+2. **증상(오버레이 안 보임)과 원인(캡처 자체가 검은 화면)이 다를 수 있음** → 픽셀 샘플링으로 진단 필수
+3. **Alpha=0은 DWM 컴포지션 문제의 강한 신호** → 타이밍 조정으로 해결 불가, API 교체 필요
+
+---
+
+**마지막 업데이트**: 2026-02-05
