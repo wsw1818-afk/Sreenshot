@@ -43,7 +43,7 @@ public class CaptureOverlayForm : Form
     private string? _tempFilePath;
 
     private bool _showHelp = true;
-    private DateTime _shownTime = DateTime.MaxValue;
+    private bool _inputEnabled;
 
     // 그리기 리소스
     private readonly Pen _selPen = new(Color.FromArgb(0, 120, 212), 2);
@@ -128,8 +128,18 @@ public class CaptureOverlayForm : Form
             Invalidate();
             Update();
 
-            // 마우스 입력 활성화 시점 기록 (버튼 클릭 잔여 이벤트 무시용)
-            _shownTime = DateTime.UtcNow;
+            // 마우스 왼쪽 버튼이 떼어진 후에만 입력 활성화 (버튼 클릭 잔여 이벤트 방지)
+            Task.Run(async () =>
+            {
+                // 마우스 버튼이 떼어질 때까지 대기 (최대 2초)
+                for (int i = 0; i < 40; i++)
+                {
+                    await Task.Delay(50);
+                    if ((Control.MouseButtons & MouseButtons.Left) == 0) break;
+                }
+                await Task.Delay(50); // 추가 버퍼
+                _inputEnabled = true;
+            });
         };
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
@@ -288,9 +298,7 @@ public class CaptureOverlayForm : Form
     private void OnMouseDown(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
-
-        // 오버레이 표시 직후 300ms 이내의 클릭은 무시 (버튼 클릭 잔여 이벤트 방지)
-        if ((DateTime.UtcNow - _shownTime).TotalMilliseconds < 300) return;
+        if (!_inputEnabled) return;
 
         _startPoint = e.Location;
         _isSelecting = true;
@@ -318,8 +326,9 @@ public class CaptureOverlayForm : Form
 
         if (sel.Width < 10 || sel.Height < 10)
         {
-            DialogResult = DialogResult.Cancel;
-            Close();
+            // 선택 영역이 너무 작으면 도움말로 복귀 (취소하지 않음)
+            _showHelp = true;
+            Invalidate();
             return;
         }
 
