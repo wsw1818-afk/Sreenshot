@@ -1,1 +1,1 @@
-🐛 버그 수정: CaptureOverlayForm Deactivate 포커스 복구 + 반복 Deactivate 자동 취소 + 30초 안전 타이머
+🐛 버그 수정: 앱 종료 시 프로세스 잔류 - ShutdownMode + OnExit Environment.Exit + 미처리 예외 핸들러

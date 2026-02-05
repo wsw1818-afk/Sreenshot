@@ -1108,16 +1108,29 @@ public partial class MainWindow : Window
         }
 
         // 리소스 정리
-        CaptureLogger.Info("MainWindow", "앱 종료 - 로그 플러시");
-        CaptureLogger.FlushToFile();
-        _hotkeyService.Dispose();
-        _captureManager.Dispose();
-        foreach (var capture in _captureHistory)
+        try
         {
-            capture.Dispose();
+            CaptureLogger.Info("MainWindow", "앱 종료 - 리소스 정리");
+            _hotkeyService.Dispose();
         }
-        _captureHistory.Clear();
-        TrayIcon.Dispose();
+        catch (Exception ex) { CaptureLogger.Error("MainWindow", "HotkeyService Dispose 실패", ex); }
+
+        try { _captureManager.Dispose(); }
+        catch (Exception ex) { CaptureLogger.Error("MainWindow", "CaptureManager Dispose 실패", ex); }
+
+        try
+        {
+            foreach (var capture in _captureHistory)
+                capture.Dispose();
+            _captureHistory.Clear();
+        }
+        catch (Exception ex) { CaptureLogger.Error("MainWindow", "CaptureHistory Dispose 실패", ex); }
+
+        try { TrayIcon.Dispose(); }
+        catch (Exception ex) { CaptureLogger.Error("MainWindow", "TrayIcon Dispose 실패", ex); }
+
+        CaptureLogger.Info("MainWindow", "리소스 정리 완료");
+        CaptureLogger.FlushToFile();
     }
 
     #endregion
