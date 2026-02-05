@@ -137,6 +137,13 @@ public class CaptureOverlayForm : Form
         {
             Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
                 $"FormClosing: DialogResult={DialogResult}, CloseReason={e.CloseReason}, ByUser={_closingByUser}");
+
+            // 사용자가 닫은 게 아니면 (시스템 Deactivate 등) 닫기를 차단
+            if (!_closingByUser && !IsDisposed)
+            {
+                e.Cancel = true;
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 (e.Cancel = true)");
+            }
         };
 
         // Shown 이벤트에서 Win32 API로 물리적 크기 강제 + 강제 다시 그리기
