@@ -1,1 +1,1 @@
-🐛 버그 수정: 영역 캡처 뿌옇게 보임 - 배경 비트맵 DPI를 96으로 강제 설정하여 DrawImageUnscaled 스케일링 방지
+🐛 버그 수정: 영역 캡처 배경 안 보임 - PictureBox + 투명 SelectionPanel 구조로 전면 재작성

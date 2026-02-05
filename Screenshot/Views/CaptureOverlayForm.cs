@@ -7,7 +7,7 @@ namespace Screenshot.Views;
 
 /// <summary>
 /// WinForms 기반 영역 선택 오버레이
-/// WPF Image 컨트롤의 블랙스크린 문제를 우회하기 위해 WinForms 사용
+/// PictureBox로 배경 이미지를 확실하게 표시
 /// </summary>
 public class CaptureOverlayForm : Form
 {
@@ -35,17 +35,11 @@ public class CaptureOverlayForm : Form
     private readonly int _screenHeight;
 
     private Bitmap? _capturedScreen;
-    private Bitmap? _backgroundBitmap;
 
-    // 선택 영역 브러시/펜
-    private readonly Pen _selectionPen = new(Color.FromArgb(0, 120, 212), 2);
-    private readonly SolidBrush _dimBrush = new(Color.FromArgb(128, 0, 0, 0));
-    private readonly SolidBrush _labelBgBrush = new(Color.FromArgb(204, 0, 0, 0));
-    private readonly Font _sizeFont = new("Consolas", 10f);
-    private readonly Font _helpFont = new("Segoe UI", 14f);
-    private readonly Font _helpSubFont = new("Segoe UI", 10f);
-
-    private bool _showHelp = true;
+    // PictureBox로 배경 이미지 표시
+    private readonly PictureBox _pictureBox;
+    // 투명 패널로 선택 영역 오버레이
+    private readonly SelectionPanel _selectionPanel;
 
     public Rectangle SelectedRegion => _selectedRegion;
     public Rectangle ImageRegion => _imageRegion;
@@ -53,7 +47,6 @@ public class CaptureOverlayForm : Form
 
     public CaptureOverlayForm(Bitmap capturedScreen)
     {
-        // DPI 자동 스케일링 비활성화 - 물리적 픽셀로 직접 제어
         AutoScaleMode = AutoScaleMode.None;
 
         var virtualScreen = SystemInformation.VirtualScreen;
@@ -64,47 +57,60 @@ public class CaptureOverlayForm : Form
 
         _capturedScreen = capturedScreen;
 
-        // 배경 이미지 복사 (원본 보존) + DPI를 96으로 강제 설정
-        // CopyFromScreen이 120 DPI로 태그하면 DrawImageUnscaled가 스케일링하므로 96으로 통일
-        _backgroundBitmap = new Bitmap(capturedScreen);
-        _backgroundBitmap.SetResolution(96f, 96f);
-
         // Form 설정
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
         ShowInTaskbar = false;
         Cursor = Cursors.Cross;
-        DoubleBuffered = true;
+        KeyPreview = true;
 
-        // 이벤트 핸들러
+        // PictureBox - 배경 이미지 표시 (가장 확실한 방법)
+        _pictureBox = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.StretchImage,
+            Image = capturedScreen
+        };
+
+        // 투명 선택 패널 - PictureBox 위에 겹침
+        _selectionPanel = new SelectionPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.Transparent
+        };
+        _selectionPanel.ShowHelp = true;
+
+        // 선택 패널의 이벤트
+        _selectionPanel.MouseDown += OnMouseDown;
+        _selectionPanel.MouseMove += OnMouseMove;
+        _selectionPanel.MouseUp += OnMouseUp;
+
+        // 순서 중요: 선택 패널이 PictureBox 위에 와야 함
+        Controls.Add(_selectionPanel);
+        Controls.Add(_pictureBox);
+        _selectionPanel.BringToFront();
+
+        // 키보드 이벤트
         KeyDown += OnKeyDown;
-        MouseDown += OnMouseDown;
-        MouseMove += OnMouseMove;
-        MouseUp += OnMouseUp;
-        Paint += OnPaint;
 
-        // Shown 이벤트에서 Win32 API로 정확한 물리적 위치/크기 강제 설정
+        // Shown 이벤트에서 Win32 API로 물리적 크기 강제
         Shown += (s, e) =>
         {
             SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
 
             GetWindowRect(Handle, out var rect);
             Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                $"Shown 후 실제 크기: Win32Rect={rect.Left},{rect.Top},{rect.Right - rect.Left}x{rect.Bottom - rect.Top}, " +
-                $"ClientSize={ClientSize.Width}x{ClientSize.Height}, Bounds={Bounds}");
+                $"Shown: Win32={rect.Left},{rect.Top},{rect.Right - rect.Left}x{rect.Bottom - rect.Top}, " +
+                $"Client={ClientSize.Width}x{ClientSize.Height}, " +
+                $"PB={_pictureBox.Width}x{_pictureBox.Height}, " +
+                $"ImgDPI={capturedScreen.HorizontalResolution:F0}x{capturedScreen.VerticalResolution:F0}");
         };
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-            $"WinForms 오버레이 생성: Screen={_screenX},{_screenY},{_screenWidth}x{_screenHeight}, " +
-            $"BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}, " +
-            $"OrigDPI={capturedScreen.HorizontalResolution:F0}x{capturedScreen.VerticalResolution:F0}, " +
-            $"ForcedDPI={_backgroundBitmap.HorizontalResolution:F0}x{_backgroundBitmap.VerticalResolution:F0}");
+            $"생성: Screen={_screenX},{_screenY},{_screenWidth}x{_screenHeight}, Img={capturedScreen.Width}x{capturedScreen.Height}");
     }
 
-    /// <summary>
-    /// 화면 캡처 (CopyFromScreen)
-    /// </summary>
     public static Bitmap? CaptureScreen()
     {
         try
@@ -118,25 +124,14 @@ public class CaptureOverlayForm : Form
                     CopyPixelOperation.SourceCopy);
             }
 
-            // 디버그: 캡처 원본 저장
-            try
-            {
-                var debugDir = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SmartCapture", "Debug");
-                System.IO.Directory.CreateDirectory(debugDir);
-                var debugPath = System.IO.Path.Combine(debugDir, $"winforms_capture_{DateTime.Now:HHmmss}.png");
-                result.Save(debugPath, ImageFormat.Png);
-                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                    $"디버그 이미지 저장: {debugPath}, 크기: {result.Width}x{result.Height}");
-            }
-            catch { }
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                $"캡처 완료: {result.Width}x{result.Height}, DPI={result.HorizontalResolution:F0}x{result.VerticalResolution:F0}");
 
             return result;
         }
         catch (Exception ex)
         {
-            Services.Capture.CaptureLogger.Error("CaptureOverlayForm", $"화면 캡처 실패: {ex.Message}", ex);
+            Services.Capture.CaptureLogger.Error("CaptureOverlayForm", $"캡처 실패: {ex.Message}", ex);
             return null;
         }
     }
@@ -162,8 +157,8 @@ public class CaptureOverlayForm : Form
 
         _startPoint = e.Location;
         _isSelecting = true;
-        _showHelp = false;
-        Invalidate();
+        _selectionPanel.ShowHelp = false;
+        _selectionPanel.Invalidate();
     }
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
@@ -171,7 +166,8 @@ public class CaptureOverlayForm : Form
         if (!_isSelecting) return;
 
         _currentPoint = e.Location;
-        Invalidate();
+        _selectionPanel.SelectionRect = GetSelectionRect();
+        _selectionPanel.Invalidate();
     }
 
     private void OnMouseUp(object? sender, MouseEventArgs e)
@@ -181,140 +177,157 @@ public class CaptureOverlayForm : Form
         _isSelecting = false;
         _currentPoint = e.Location;
 
-        int x = Math.Min(_startPoint.X, _currentPoint.X);
-        int y = Math.Min(_startPoint.Y, _currentPoint.Y);
-        int width = Math.Abs(_currentPoint.X - _startPoint.X);
-        int height = Math.Abs(_currentPoint.Y - _startPoint.Y);
+        var sel = GetSelectionRect();
 
-        if (width < 10 || height < 10)
+        if (sel.Width < 10 || sel.Height < 10)
         {
             DialogResult = DialogResult.Cancel;
             Close();
             return;
         }
 
-        // Form 좌표 → 이미지(물리적 픽셀) 좌표 변환
-        // Win32 API로 실제 창 크기 가져오기 (DPI 스케일링 무관)
+        // 좌표 변환: 패널 좌표 → 이미지 좌표
         GetWindowRect(Handle, out var winRect);
         int actualW = winRect.Right - winRect.Left;
         int actualH = winRect.Bottom - winRect.Top;
         double scaleX = (double)_screenWidth / actualW;
         double scaleY = (double)_screenHeight / actualH;
 
-        int imgX = (int)Math.Round(x * scaleX);
-        int imgY = (int)Math.Round(y * scaleY);
-        int imgW = (int)Math.Round(width * scaleX);
-        int imgH = (int)Math.Round(height * scaleY);
+        int imgX = (int)Math.Round(sel.X * scaleX);
+        int imgY = (int)Math.Round(sel.Y * scaleY);
+        int imgW = (int)Math.Round(sel.Width * scaleX);
+        int imgH = (int)Math.Round(sel.Height * scaleY);
 
         _selectedRegion = new Rectangle(_screenX + imgX, _screenY + imgY, imgW, imgH);
         _imageRegion = new Rectangle(imgX, imgY, imgW, imgH);
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-            $"영역 선택: Form({x},{y},{width}x{height}) → Image({imgX},{imgY},{imgW}x{imgH}), Scale={scaleX:F2}x{scaleY:F2}");
+            $"선택: Panel({sel.X},{sel.Y},{sel.Width}x{sel.Height}) → Img({imgX},{imgY},{imgW}x{imgH}), Scale={scaleX:F2}x{scaleY:F2}");
 
         DialogResult = DialogResult.OK;
         Close();
     }
 
-    private void OnPaint(object? sender, PaintEventArgs e)
+    private Rectangle GetSelectionRect()
     {
-        var g = e.Graphics;
-
-        // 배경 이미지를 1:1 픽셀로 직접 그리기 (보간 없음)
-        if (_backgroundBitmap != null)
-        {
-            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-            g.DrawImageUnscaled(_backgroundBitmap, 0, 0);
-        }
-
-        // 배경 그린 후 알파 블렌딩 모드로 복원 (반투명 오버레이용)
-        g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-
-        if (_showHelp)
-        {
-            DrawHelpPanel(g);
-            return;
-        }
-
-        if (!_isSelecting) return;
-
         int x = Math.Min(_startPoint.X, _currentPoint.X);
         int y = Math.Min(_startPoint.Y, _currentPoint.Y);
-        int width = Math.Abs(_currentPoint.X - _startPoint.X);
-        int height = Math.Abs(_currentPoint.Y - _startPoint.Y);
-
-        // 어두운 오버레이 (선택 영역 제외)
-        var region = new Region(new Rectangle(0, 0, ClientSize.Width, ClientSize.Height));
-        if (width > 0 && height > 0)
-        {
-            region.Exclude(new Rectangle(x, y, width, height));
-        }
-        g.FillRegion(_dimBrush, region);
-        region.Dispose();
-
-        // 선택 사각형
-        if (width > 0 && height > 0)
-        {
-            g.DrawRectangle(_selectionPen, x, y, width, height);
-        }
-
-        // 크기 레이블
-        var sizeText = $"{width} x {height}";
-        var textSize = g.MeasureString(sizeText, _sizeFont);
-        var labelX = (float)x;
-        var labelY = y - textSize.Height - 8;
-        if (labelY < 0) labelY = y + height + 4;
-
-        g.FillRectangle(_labelBgBrush, labelX, labelY, textSize.Width + 12, textSize.Height + 6);
-        g.DrawString(sizeText, _sizeFont, Brushes.White, labelX + 6, labelY + 3);
-    }
-
-    private void DrawHelpPanel(Graphics g)
-    {
-        var helpText = "드래그하여 캡처할 영역을 선택하세요";
-        var subText = "ESC: 취소  |  Enter: 전체 화면 캡처";
-
-        var helpSize = g.MeasureString(helpText, _helpFont);
-        var subSize = g.MeasureString(subText, _helpSubFont);
-
-        var panelWidth = Math.Max(helpSize.Width, subSize.Width) + 60;
-        var panelHeight = helpSize.Height + subSize.Height + 40;
-
-        var panelX = (ClientSize.Width - panelWidth) / 2;
-        var panelY = (ClientSize.Height - panelHeight) / 2;
-
-        // 패널 배경
-        using var panelBrush = new SolidBrush(Color.FromArgb(204, 30, 30, 30));
-        var panelRect = new RectangleF(panelX, panelY, panelWidth, panelHeight);
-        g.FillRectangle(panelBrush, panelRect);
-
-        // 메인 텍스트
-        var textX = panelX + (panelWidth - helpSize.Width) / 2;
-        var textY = panelY + 15;
-        g.DrawString(helpText, _helpFont, Brushes.White, textX, textY);
-
-        // 서브 텍스트
-        using var grayBrush = new SolidBrush(Color.FromArgb(136, 136, 136));
-        var subX = panelX + (panelWidth - subSize.Width) / 2;
-        var subY = textY + helpSize.Height + 10;
-        g.DrawString(subText, _helpSubFont, grayBrush, subX, subY);
+        int w = Math.Abs(_currentPoint.X - _startPoint.X);
+        int h = Math.Abs(_currentPoint.Y - _startPoint.Y);
+        return new Rectangle(x, y, w, h);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _selectionPen.Dispose();
-            _dimBrush.Dispose();
-            _labelBgBrush.Dispose();
-            _sizeFont.Dispose();
-            _helpFont.Dispose();
-            _helpSubFont.Dispose();
-            _backgroundBitmap?.Dispose();
+            _pictureBox.Image = null; // Dispose 방지 (원본은 외부 관리)
+            _pictureBox.Dispose();
+            _selectionPanel.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// 투명 선택 영역 패널 - PictureBox 위에 겹쳐서 표시
+    /// </summary>
+    private class SelectionPanel : Panel
+    {
+        public Rectangle SelectionRect { get; set; }
+        public bool ShowHelp { get; set; } = true;
+
+        private readonly Pen _selPen = new(Color.FromArgb(0, 120, 212), 2);
+        private readonly SolidBrush _dimBrush = new(Color.FromArgb(128, 0, 0, 0));
+        private readonly SolidBrush _labelBg = new(Color.FromArgb(204, 0, 0, 0));
+        private readonly Font _sizeFont = new("Consolas", 10f);
+        private readonly Font _helpFont = new("Segoe UI", 14f);
+        private readonly Font _helpSubFont = new("Segoe UI", 10f);
+
+        public SelectionPanel()
+        {
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+            SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            SetStyle(ControlStyles.UserPaint, true);
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= 0x20; // WS_EX_TRANSPARENT
+                return cp;
+            }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            // 배경 그리지 않음 (투명)
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+
+            if (ShowHelp)
+            {
+                DrawHelp(g);
+                return;
+            }
+
+            if (SelectionRect.Width <= 0 || SelectionRect.Height <= 0) return;
+
+            // 어두운 오버레이 (선택 영역 제외)
+            using var region = new Region(new Rectangle(0, 0, Width, Height));
+            region.Exclude(SelectionRect);
+            g.FillRegion(_dimBrush, region);
+
+            // 선택 사각형
+            g.DrawRectangle(_selPen, SelectionRect);
+
+            // 크기 레이블
+            var text = $"{SelectionRect.Width} x {SelectionRect.Height}";
+            var sz = g.MeasureString(text, _sizeFont);
+            float lx = SelectionRect.X;
+            float ly = SelectionRect.Y - sz.Height - 8;
+            if (ly < 0) ly = SelectionRect.Bottom + 4;
+
+            g.FillRectangle(_labelBg, lx, ly, sz.Width + 12, sz.Height + 6);
+            g.DrawString(text, _sizeFont, Brushes.White, lx + 6, ly + 3);
+        }
+
+        private void DrawHelp(Graphics g)
+        {
+            var t1 = "드래그하여 캡처할 영역을 선택하세요";
+            var t2 = "ESC: 취소  |  Enter: 전체 화면 캡처";
+            var s1 = g.MeasureString(t1, _helpFont);
+            var s2 = g.MeasureString(t2, _helpSubFont);
+            var pw = Math.Max(s1.Width, s2.Width) + 60;
+            var ph = s1.Height + s2.Height + 40;
+            var px = (Width - pw) / 2;
+            var py = (Height - ph) / 2;
+
+            using var bg = new SolidBrush(Color.FromArgb(204, 30, 30, 30));
+            g.FillRectangle(bg, px, py, pw, ph);
+            g.DrawString(t1, _helpFont, Brushes.White, px + (pw - s1.Width) / 2, py + 15);
+            using var gray = new SolidBrush(Color.FromArgb(136, 136, 136));
+            g.DrawString(t2, _helpSubFont, gray, px + (pw - s2.Width) / 2, py + 15 + s1.Height + 10);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _selPen.Dispose();
+                _dimBrush.Dispose();
+                _labelBg.Dispose();
+                _sizeFont.Dispose();
+                _helpFont.Dispose();
+                _helpSubFont.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 }
