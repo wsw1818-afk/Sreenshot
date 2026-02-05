@@ -343,12 +343,21 @@ public partial class MainWindow : Window
 
             StatusText.Text = "스크롤 캡처 중...";
 
-            _scrollCaptureService.ProgressChanged += (current, total) =>
+            void OnScrollProgress(int current, int total)
             {
                 Dispatcher.Invoke(() => StatusText.Text = $"스크롤 캡처 중... ({current}장)");
-            };
+            }
 
-            var bitmap = await _scrollCaptureService.CaptureScrollingWindowAsync(400);
+            _scrollCaptureService.ProgressChanged += OnScrollProgress;
+            Bitmap? bitmap;
+            try
+            {
+                bitmap = await _scrollCaptureService.CaptureScrollingWindowAsync(400);
+            }
+            finally
+            {
+                _scrollCaptureService.ProgressChanged -= OnScrollProgress;
+            }
 
             Show();
             InvalidateVisual();
@@ -391,13 +400,22 @@ public partial class MainWindow : Window
             }
             string targetUrl = urlDialog.Url;
 
-            _chromeCaptureService.StatusChanged += status =>
+            void OnChromeStatus(string status)
             {
                 Dispatcher.Invoke(() => StatusText.Text = status);
-            };
+            }
 
-            // URL을 지정하여 캡처 (Google Sheets는 자동으로 키보드 스크롤 캡처 사용)
-            Bitmap? bitmap = await _chromeCaptureService.CaptureUrlAsync(targetUrl);
+            _chromeCaptureService.StatusChanged += OnChromeStatus;
+            Bitmap? bitmap;
+            try
+            {
+                // URL을 지정하여 캡처 (Google Sheets는 자동으로 키보드 스크롤 캡처 사용)
+                bitmap = await _chromeCaptureService.CaptureUrlAsync(targetUrl);
+            }
+            finally
+            {
+                _chromeCaptureService.StatusChanged -= OnChromeStatus;
+            }
 
             if (bitmap != null)
             {
@@ -463,9 +481,29 @@ public partial class MainWindow : Window
                         Debug.WriteLine($"자동 저장 실패: {ex.Message}");
                     }
                 }
-                else if (!string.IsNullOrEmpty(result.SavedFilePath))
+                else if (!string.IsNullOrEmpty(result.SavedFilePath) && File.Exists(result.SavedFilePath))
                 {
                     Services.Capture.CaptureLogger.Info("MainWindow", $"[HandleCaptureResult] 이미 저장됨, 중복 저장 건너뜀: {result.SavedFilePath}");
+                }
+                else if (!string.IsNullOrEmpty(result.SavedFilePath) && !File.Exists(result.SavedFilePath))
+                {
+                    // 경로는 있지만 파일이 삭제된 경우 다시 저장
+                    Services.Capture.CaptureLogger.Warn("MainWindow", $"[HandleCaptureResult] 파일 누락, 재저장: {result.SavedFilePath}");
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(result.SavedFilePath)!);
+                        var format = Path.GetExtension(result.SavedFilePath).ToLower() switch
+                        {
+                            ".jpg" or ".jpeg" => ImageFormat.Jpeg,
+                            ".bmp" => ImageFormat.Bmp,
+                            _ => ImageFormat.Png
+                        };
+                        result.Image.Save(result.SavedFilePath, format);
+                    }
+                    catch (Exception ex)
+                    {
+                        Services.Capture.CaptureLogger.Error("MainWindow", "[HandleCaptureResult] 재저장 실패", ex);
+                    }
                 }
 
                 // 히스토리 관리

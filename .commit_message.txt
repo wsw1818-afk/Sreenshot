@@ -1,1 +1,1 @@
-🐛 버그 수정: 영역 캡처 Deactivate 시 SetForegroundWindow로 강제 포커스 복귀 (FormClosing 차단 제거)
+🐛 버그 일괄 수정: 스레드 타임아웃/DivisionByZero/이벤트 누수/DXGI ReleaseFrame/Null참조/파일검증 (7건)

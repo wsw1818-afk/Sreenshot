@@ -49,8 +49,8 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                     {
                         try
                         {
-                            // 세션 유효성 테스트 - 가벼운 체크
-                            _duplication.ReleaseFrame();
+                            // 세션 유효성 테스트 - Description 조회로 가볍게 체크
+                            _ = _duplication.Description;
                             _cachedAvailability = true;
                             _lastAvailabilityCheck = DateTime.Now;
                             CaptureLogger.Verbose("DXGI", "IsAvailable: 기존 세션 유효");

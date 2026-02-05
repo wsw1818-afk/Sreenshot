@@ -260,7 +260,7 @@ public class CaptureManager : IDisposable
             {
                 var result = captureFunc(engine);
 
-                if (result.Success && result.Image != null && !IsBlackImage(result.Image))
+                if (result?.Success == true && result.Image != null && !IsBlackImage(result.Image))
                 {
                     sw.Stop();
                     CaptureLogger.Info("Capture", $"Raw 성공 ({engine.Name}, {sw.ElapsedMilliseconds}ms)");
@@ -268,10 +268,7 @@ public class CaptureManager : IDisposable
                     return result;
                 }
 
-                if (result.Image != null)
-                {
-                    result.Image.Dispose();
-                }
+                result?.Image?.Dispose();
             }
             catch (Exception ex)
             {

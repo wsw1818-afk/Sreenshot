@@ -357,8 +357,8 @@ public class CaptureOverlayForm : Form
 
         // 좌표 변환: 폼 좌표 → 이미지 좌표
         GetWindowRect(Handle, out var winRect);
-        int actualW = winRect.Right - winRect.Left;
-        int actualH = winRect.Bottom - winRect.Top;
+        int actualW = Math.Max(1, winRect.Right - winRect.Left);
+        int actualH = Math.Max(1, winRect.Bottom - winRect.Top);
         double scaleX = (double)_screenWidth / actualW;
         double scaleY = (double)_screenHeight / actualH;
 
@@ -397,7 +397,11 @@ public class CaptureOverlayForm : Form
             // 임시 파일 삭제
             if (_tempFilePath != null && File.Exists(_tempFilePath))
             {
-                try { File.Delete(_tempFilePath); } catch { }
+                try { File.Delete(_tempFilePath); }
+                catch (Exception ex)
+                {
+                    Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", $"임시 파일 삭제 실패: {_tempFilePath}, {ex.Message}");
+                }
             }
 
             _selPen.Dispose();

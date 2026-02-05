@@ -52,12 +52,13 @@ public class WinRtCapture : ICaptureEngine, IDisposable
                 }
             });
             staThread.SetApartmentState(ApartmentState.STA);
+            staThread.IsBackground = true; // 프로세스 종료 시 자동 정리
             staThread.Start();
             staThread.Join(10000); // 10초 타임아웃
-            
+
             if (staThread.IsAlive)
             {
-                staThread.Interrupt();
+                CaptureLogger.Warn("WinRT", "STA 스레드 타임아웃 - 백그라운드 스레드로 종료 대기");
                 return new CaptureResult { Success = false, ErrorMessage = "WinRT 캡처 타임아웃" };
             }
             
