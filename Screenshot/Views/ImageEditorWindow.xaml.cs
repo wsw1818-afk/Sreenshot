@@ -630,6 +630,10 @@ public partial class ImageEditorWindow : Window
         _undoStack.Clear();
         _redoStack.Clear();
 
+        // 에디터 내부 이미지 정리
+        _originalImage?.Dispose();
+        _editedImage?.Dispose();
+
         base.OnClosed(e);
     }
 }

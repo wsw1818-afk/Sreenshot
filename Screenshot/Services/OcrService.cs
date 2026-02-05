@@ -63,7 +63,7 @@ public class OcrService
             stream.Seek(0);
 
             var decoder = await BitmapDecoder.CreateAsync(stream);
-            var softwareBitmap = await decoder.GetSoftwareBitmapAsync();
+            using var softwareBitmap = await decoder.GetSoftwareBitmapAsync();
 
             // OCR 실행
             var ocrResult = await _ocrEngine.RecognizeAsync(softwareBitmap);

@@ -479,18 +479,30 @@ public class ChromeCaptureService
 
             // 이미지 합성
             Bitmap? result = null;
-            if (captures.Count == 1)
+            try
             {
-                result = captures[0];
+                if (captures.Count == 1)
+                {
+                    result = captures[0];
+                }
+                else
+                {
+                    result = StitchImages(captures);
+                    // 합성 후 원본 이미지들 정리
+                    foreach (var cap in captures)
+                    {
+                        cap.Dispose();
+                    }
+                }
             }
-            else
+            catch
             {
-                result = StitchImages(captures);
-                // 합성 후 원본 이미지들 정리
+                // StitchImages 예외 시 원본 이미지들 정리
                 foreach (var cap in captures)
                 {
                     cap.Dispose();
                 }
+                throw;
             }
 
             StatusChanged?.Invoke("캡처 완료");

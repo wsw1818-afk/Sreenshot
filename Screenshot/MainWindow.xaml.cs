@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -16,10 +15,6 @@ namespace Screenshot;
 
 public partial class MainWindow : Window
 {
-    // DWM 동기화를 위한 P/Invoke
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmFlush();
-
     private readonly AppSettings _settings;
     private readonly CaptureManager _captureManager;
     private readonly HotkeyService _hotkeyService;
@@ -1008,22 +1003,32 @@ public partial class MainWindow : Window
 
     private async Task CaptureMonitorAsync(int monitorIndex)
     {
-        StatusText.Text = $"모니터 {monitorIndex + 1} 캡처 중...";
+        if (_isCapturing) return;
+        _isCapturing = true;
 
-        var wasVisible = IsVisible;
-        if (wasVisible) Hide();
-        await Task.Delay(200);
-
-        var result = await _captureManager.CaptureMonitorAsync(monitorIndex);
-
-        if (wasVisible)
+        try
         {
-            Show();
-            InvalidateVisual();
-            UpdateLayout();
-        }
+            StatusText.Text = $"모니터 {monitorIndex + 1} 캡처 중...";
 
-        HandleCaptureResult(result);
+            var wasVisible = IsVisible;
+            if (wasVisible) Hide();
+            await Task.Delay(200);
+
+            var result = await _captureManager.CaptureMonitorAsync(monitorIndex);
+
+            if (wasVisible)
+            {
+                Show();
+                InvalidateVisual();
+                UpdateLayout();
+            }
+
+            HandleCaptureResult(result);
+        }
+        finally
+        {
+            _isCapturing = false;
+        }
     }
 
     #endregion
@@ -1117,164 +1122,4 @@ public partial class MainWindow : Window
 
     #endregion
 
-    #region CaptureScreen Direct (MainWindow에 구현)
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetDesktopWindow();
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetWindowDC(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight,
-        IntPtr hdcSrc, int nXSrc, int nYSrc, uint dwRop);
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool DeleteObject(IntPtr hObject);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool DeleteDC(IntPtr hdc);
-
-    private const uint SRCCOPY = 0x00CC0020;
-    private const uint CAPTUREBLT = 0x40000000;
-
-    /// <summary>
-    /// 영역 캡처용 - Opacity 방식 사용시 검은 화면이 나오지 않음
-    /// (확장 모니터가 검은 배경일 수 있으므로 검은 화면 검증 생략)
-    /// </summary>
-    private static System.Drawing.Bitmap? CaptureScreenForRegion()
-    {
-        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenForRegion] CopyFromScreen (검은 화면 검사 생략)");
-        return CaptureScreenWithCopyFromScreen();
-    }
-
-    private static System.Drawing.Bitmap? CaptureScreenDirect()
-    {
-        Services.Capture.CaptureLogger.DebugLog("MainWindow", "[CaptureScreenDirect] CopyFromScreen 사용 (재시도 포함)");
-
-        // 검은 화면 감지 및 최대 3회 재시도
-        for (int attempt = 1; attempt <= 3; attempt++)
-        {
-            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 시도 {attempt}/3");
-
-            var bitmap = CaptureScreenWithCopyFromScreen();
-
-            if (bitmap == null)
-            {
-                Services.Capture.CaptureLogger.Warn("MainWindow", $"[CaptureScreenDirect] 시도 {attempt} 실패: null 반환");
-                if (attempt < 3) Thread.Sleep(200 * attempt);
-                continue;
-            }
-
-            // 검은 화면 체크
-            if (IsBlackImage(bitmap))
-            {
-                Services.Capture.CaptureLogger.Warn("MainWindow", $"[CaptureScreenDirect] 시도 {attempt}: 검은 화면 감지, 재시도...");
-                bitmap.Dispose();
-                if (attempt < 3) Thread.Sleep(300 * attempt);
-                continue;
-            }
-
-            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenDirect] 성공 (시도 {attempt}): {bitmap.Width}x{bitmap.Height}");
-            return bitmap;
-        }
-
-        Services.Capture.CaptureLogger.Error("MainWindow", "[CaptureScreenDirect] 3회 시도 후 실패");
-        return null;
-    }
-
-    private static System.Drawing.Bitmap? CaptureScreenWithCopyFromScreen()
-    {
-        try
-        {
-            var virtualScreen = SystemInformation.VirtualScreen;
-            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenWithCopyFromScreen] VirtualScreen: {virtualScreen.Width}x{virtualScreen.Height} @ ({virtualScreen.X},{virtualScreen.Y})");
-            
-            var result = new System.Drawing.Bitmap(virtualScreen.Width, virtualScreen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            using (var g = System.Drawing.Graphics.FromImage(result))
-            {
-                // SourceCopy만 사용 (CaptureBlt는 일부 환경에서 InvalidEnumArgumentException)
-                g.CopyFromScreen(virtualScreen.X, virtualScreen.Y, 0, 0,
-                    new System.Drawing.Size(virtualScreen.Width, virtualScreen.Height),
-                    CopyPixelOperation.SourceCopy);
-            }
-            Services.Capture.CaptureLogger.DebugLog("MainWindow", $"[CaptureScreenWithCopyFromScreen] 성공: {result.Width}x{result.Height}");
-            return result;
-        }
-        catch (Exception ex)
-        {
-            Services.Capture.CaptureLogger.Error("MainWindow", "[CaptureScreenWithCopyFromScreen] 예외", ex);
-            return null;
-        }
-    }
-
-    private static bool IsBlackImage(System.Drawing.Bitmap bitmap)
-    {
-        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
-        int sampleCount = Math.Min(20, Math.Max(5, bitmap.Width * bitmap.Height / 100));
-        int blackCount = 0;
-        var random = new Random();
-        for (int i = 0; i < sampleCount; i++)
-        {
-            int x = random.Next(bitmap.Width);
-            int y = random.Next(bitmap.Height);
-            try
-            {
-                var pixel = bitmap.GetPixel(x, y);
-                if (pixel.R < 15 && pixel.G < 15 && pixel.B < 15)
-                    blackCount++;
-            }
-            catch { }
-        }
-        return (double)blackCount / sampleCount >= 0.85;
-    }
-
-    /// <summary>
-    /// 완전한 검은 화멧만 감지 (임계값 더 엄격)
-    /// </summary>
-    private static bool IsAlmostBlackImage(System.Drawing.Bitmap bitmap)
-    {
-        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
-        
-        // 더 많은 샘플로 체크
-        int sampleCount = Math.Min(100, Math.Max(20, bitmap.Width * bitmap.Height / 50));
-        int blackCount = 0;
-        var random = new Random();
-        
-        for (int i = 0; i < sampleCount; i++)
-        {
-            int x = random.Next(bitmap.Width);
-            int y = random.Next(bitmap.Height);
-            try
-            {
-                var pixel = bitmap.GetPixel(x, y);
-                // 완전 검은색에 가까운 것만 카운트 (임계값 5)
-                if (pixel.R < 5 && pixel.G < 5 && pixel.B < 5)
-                    blackCount++;
-            }
-            catch { }
-        }
-        
-        // 95% 이상이 완전 검은색이어야 실패로 간주
-        bool isBlack = (double)blackCount / sampleCount >= 0.95;
-        if (isBlack)
-        {
-            Services.Capture.CaptureLogger.Warn("MainWindow", $"[IsAlmostBlackImage] 검은 화면 감지: {blackCount}/{sampleCount} ({(double)blackCount/sampleCount:P1})");
-        }
-        return isBlack;
-    }
-
-    #endregion
 }

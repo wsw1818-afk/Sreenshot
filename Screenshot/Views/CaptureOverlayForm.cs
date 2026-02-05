@@ -252,68 +252,6 @@ public class CaptureOverlayForm : Form
         g.DrawString(t2, _helpSubFont, gray, px + (pw - s2.Width) / 2, py + 15 + s1.Height + 10);
     }
 
-    public static Bitmap? CaptureScreen()
-    {
-        try
-        {
-            var virtualScreen = SystemInformation.VirtualScreen;
-            var result = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(result))
-            {
-                g.CopyFromScreen(virtualScreen.X, virtualScreen.Y, 0, 0,
-                    new Size(virtualScreen.Width, virtualScreen.Height),
-                    CopyPixelOperation.SourceCopy);
-            }
-
-            // 캡처 결과 검증: 픽셀 샘플링으로 검은 화면인지 확인
-            int blackCount = 0;
-            int sampleCount = 0;
-            var checkPoints = new[] {
-                (result.Width / 4, result.Height / 4),
-                (result.Width / 2, result.Height / 2),
-                (result.Width * 3 / 4, result.Height * 3 / 4),
-                (100, 100),
-                (result.Width - 100, 100)
-            };
-            foreach (var (px, py) in checkPoints)
-            {
-                if (px >= 0 && px < result.Width && py >= 0 && py < result.Height)
-                {
-                    var pixel = result.GetPixel(px, py);
-                    sampleCount++;
-                    if (pixel.R < 10 && pixel.G < 10 && pixel.B < 10) blackCount++;
-                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                        $"캡처픽셀({px},{py}): R={pixel.R} G={pixel.G} B={pixel.B} A={pixel.A}");
-                }
-            }
-
-            // 디버그: 캡처된 이미지 파일로 저장
-            try
-            {
-                var debugDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SmartCapture", "Debug");
-                Directory.CreateDirectory(debugDir);
-                var debugPath = Path.Combine(debugDir, $"winforms_capture_{DateTime.Now:HHmmss}.png");
-                result.Save(debugPath, ImageFormat.Png);
-                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                    $"디버그이미지 저장: {debugPath}");
-            }
-            catch { }
-
-            Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                $"캡처 완료: {result.Width}x{result.Height}, DPI={result.HorizontalResolution:F0}x{result.VerticalResolution:F0}, " +
-                $"BlackPixels={blackCount}/{sampleCount}");
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            Services.Capture.CaptureLogger.Error("CaptureOverlayForm", $"캡처 실패: {ex.Message}", ex);
-            return null;
-        }
-    }
-
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.KeyCode == Keys.Escape)
