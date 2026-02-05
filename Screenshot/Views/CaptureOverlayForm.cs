@@ -43,6 +43,7 @@ public class CaptureOverlayForm : Form
     private string? _tempFilePath;
 
     private bool _showHelp = true;
+    private DateTime _shownTime = DateTime.MaxValue;
 
     // 그리기 리소스
     private readonly Pen _selPen = new(Color.FromArgb(0, 120, 212), 2);
@@ -126,6 +127,9 @@ public class CaptureOverlayForm : Form
             // 강제 다시 그리기
             Invalidate();
             Update();
+
+            // 마우스 입력 활성화 시점 기록 (버튼 클릭 잔여 이벤트 무시용)
+            _shownTime = DateTime.UtcNow;
         };
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
@@ -284,6 +288,9 @@ public class CaptureOverlayForm : Form
     private void OnMouseDown(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+
+        // 오버레이 표시 직후 300ms 이내의 클릭은 무시 (버튼 클릭 잔여 이벤트 방지)
+        if ((DateTime.UtcNow - _shownTime).TotalMilliseconds < 300) return;
 
         _startPoint = e.Location;
         _isSelecting = true;
