@@ -164,7 +164,7 @@ public partial class MainWindow : Window
             Hide();
             await Task.Delay(200);
 
-            var capturedScreen = CaptureOverlay.CaptureScreen();
+            var capturedScreen = CaptureOverlayForm.CaptureScreen();
             if (capturedScreen == null)
             {
                 Show();
@@ -172,37 +172,44 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var overlay = new CaptureOverlay(capturedScreen);
-            var dialogResult = overlay.ShowDialog();
-
-            if (dialogResult == true && overlay.SelectedRegion != System.Drawing.Rectangle.Empty && overlay.CapturedScreen != null)
+            // WinForms 오버레이 사용 (WPF 블랙스크린 문제 우회)
+            System.Windows.Forms.DialogResult dialogResult;
+            CaptureOverlayForm overlay;
+            using (overlay = new CaptureOverlayForm(capturedScreen))
             {
-                var imageRegion = overlay.ImageRegion;
-                StatusText.Text = $"영역 캡처 중...";
+                dialogResult = overlay.ShowDialog();
 
-                var cropX = Math.Max(0, imageRegion.X);
-                var cropY = Math.Max(0, imageRegion.Y);
-                var cropWidth = Math.Min(imageRegion.Width, overlay.CapturedScreen.Width - cropX);
-                var cropHeight = Math.Min(imageRegion.Height, overlay.CapturedScreen.Height - cropY);
-
-                if (cropWidth > 0 && cropHeight > 0)
+                if (dialogResult == System.Windows.Forms.DialogResult.OK
+                    && overlay.SelectedRegion != System.Drawing.Rectangle.Empty
+                    && overlay.CapturedScreen != null)
                 {
-                    var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
-                    var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
+                    var imageRegion = overlay.ImageRegion;
+                    StatusText.Text = $"영역 캡처 중...";
 
-                    var result = new CaptureResult
+                    var cropX = Math.Max(0, imageRegion.X);
+                    var cropY = Math.Max(0, imageRegion.Y);
+                    var cropWidth = Math.Min(imageRegion.Width, overlay.CapturedScreen.Width - cropX);
+                    var cropHeight = Math.Min(imageRegion.Height, overlay.CapturedScreen.Height - cropY);
+
+                    if (cropWidth > 0 && cropHeight > 0)
                     {
-                        Success = true,
-                        Image = croppedImage,
-                        EngineName = "RegionCapture"
-                    };
-                    HandleCaptureResult(result);
+                        var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
+                        var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
+
+                        var result = new CaptureResult
+                        {
+                            Success = true,
+                            Image = croppedImage,
+                            EngineName = "RegionCapture"
+                        };
+                        HandleCaptureResult(result);
+                    }
+                    overlay.CapturedScreen.Dispose();
                 }
-                overlay.CapturedScreen.Dispose();
-            }
-            else
-            {
-                overlay.CapturedScreen?.Dispose();
+                else
+                {
+                    overlay.CapturedScreen?.Dispose();
+                }
             }
 
             Show();
