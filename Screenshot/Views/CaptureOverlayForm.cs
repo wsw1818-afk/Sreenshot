@@ -19,6 +19,9 @@ public class CaptureOverlayForm : Form
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -113,34 +116,21 @@ public class CaptureOverlayForm : Form
         KeyDown += OnKeyDown;
         Paint += OnPaint;
 
-        // 포커스 상실 시 재활성화 (WPF 앱에서 WinForms 다이얼로그가 포커스를 잃을 수 있음)
+        // 포커스 상실 시 Win32 API로 강제 최상단 복귀
         Deactivate += (s, e) =>
         {
-            Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Deactivate 발생 - 재활성화 시도");
-            BeginInvoke(new Action(() =>
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Deactivate 발생 - Win32 최상단 복귀");
+            if (!IsDisposed && !_closingByUser)
             {
-                if (!IsDisposed && Visible)
-                {
-                    Activate();
-                    BringToFront();
-                }
-            }));
+                SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+                SetForegroundWindow(Handle);
+            }
         };
 
         FormClosing += (s, e) =>
         {
             Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
                 $"FormClosing: DialogResult={DialogResult}, CloseReason={e.CloseReason}, ByUser={_closingByUser}");
-            // 사용자가 명시적으로 닫지 않은 경우 (포커스 상실 등) 닫기 차단
-            if (!_closingByUser && e.CloseReason != CloseReason.ApplicationExitCall
-                && e.CloseReason != CloseReason.TaskManagerClosing
-                && e.CloseReason != CloseReason.WindowsShutDown)
-            {
-                Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비정상 닫기 차단됨");
-                e.Cancel = true;
-                Activate();
-                BringToFront();
-            }
         };
 
         // Shown 이벤트에서 Win32 API로 물리적 크기 강제 + 강제 다시 그리기

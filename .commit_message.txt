@@ -1,1 +1,1 @@
-🐛 버그 수정: 영역 캡처 자동 취소 - FormClosing 비정상 닫기 차단 + Deactivate 재활성화 + 디버그 로그 추가
+🐛 버그 수정: 영역 캡처 Deactivate 시 SetForegroundWindow로 강제 포커스 복귀 (FormClosing 차단 제거)
