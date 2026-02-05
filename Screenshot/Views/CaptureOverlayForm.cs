@@ -40,6 +40,9 @@ public class CaptureOverlayForm : Form
 
     public CaptureOverlayForm(Bitmap capturedScreen)
     {
+        // DPI 자동 스케일링 비활성화 - 물리적 픽셀로 직접 제어
+        AutoScaleMode = AutoScaleMode.None;
+
         var virtualScreen = SystemInformation.VirtualScreen;
         _screenX = virtualScreen.X;
         _screenY = virtualScreen.Y;
@@ -55,15 +58,14 @@ public class CaptureOverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Location = new Point(_screenX, _screenY);
-        Size = new Size(_screenWidth, _screenHeight);
+        ClientSize = new Size(_screenWidth, _screenHeight);
         TopMost = true;
         ShowInTaskbar = false;
         Cursor = Cursors.Cross;
         DoubleBuffered = true;
 
-        // 배경 이미지 직접 설정
-        BackgroundImage = _backgroundBitmap;
-        BackgroundImageLayout = ImageLayout.Stretch;
+        // BackgroundImage 사용하지 않음 - Paint에서 직접 그려서 선명하게 표시
+        // (Stretch 모드의 보간법으로 인한 뿌옇게 보이는 문제 방지)
 
         // 이벤트 핸들러
         KeyDown += OnKeyDown;
@@ -73,7 +75,7 @@ public class CaptureOverlayForm : Form
         Paint += OnPaint;
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-            $"WinForms 오버레이 생성: Location={_screenX},{_screenY}, Size={_screenWidth}x{_screenHeight}, BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}");
+            $"WinForms 오버레이 생성: Location={_screenX},{_screenY}, ClientSize={_screenWidth}x{_screenHeight}, BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}");
     }
 
     /// <summary>
@@ -179,9 +181,16 @@ public class CaptureOverlayForm : Form
     {
         var g = e.Graphics;
 
+        // 배경 이미지를 직접 그리기 (NearestNeighbor로 선명하게)
+        if (_backgroundBitmap != null)
+        {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            g.DrawImage(_backgroundBitmap, 0, 0, ClientSize.Width, ClientSize.Height);
+        }
+
         if (_showHelp)
         {
-            // 안내 텍스트 표시
             DrawHelpPanel(g);
             return;
         }
@@ -211,7 +220,7 @@ public class CaptureOverlayForm : Form
         // 크기 레이블
         var sizeText = $"{width} x {height}";
         var textSize = g.MeasureString(sizeText, _sizeFont);
-        var labelX = x;
+        var labelX = (float)x;
         var labelY = y - textSize.Height - 8;
         if (labelY < 0) labelY = y + height + 4;
 
