@@ -39,6 +39,7 @@ public partial class ImageEditorWindow : Window
     private bool _isDrawing;
     private Shape? _currentShape;
 
+    private const int MaxUndoCount = 20;
     private readonly Stack<Bitmap> _undoStack = new();
     private readonly Stack<Bitmap> _redoStack = new();
 
@@ -536,6 +537,19 @@ public partial class ImageEditorWindow : Window
     private void SaveUndoState()
     {
         _undoStack.Push((Bitmap)_editedImage.Clone());
+
+        // Undo 스택 크기 제한 - 초과 시 가장 오래된 항목 제거
+        while (_undoStack.Count > MaxUndoCount)
+        {
+            var items = _undoStack.ToArray();
+            _undoStack.Clear();
+            // 마지막(가장 오래된)을 제외하고 다시 넣기
+            items[items.Length - 1].Dispose();
+            for (int i = items.Length - 2; i >= 0; i--)
+                _undoStack.Push(items[i]);
+        }
+
+        foreach (var bmp in _redoStack) bmp.Dispose();
         _redoStack.Clear();
     }
 

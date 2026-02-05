@@ -27,6 +27,7 @@ public class NotificationService
         SystemSounds.Asterisk.Play();
 
         // 토스트 알림 표시
+        if (Application.Current?.Dispatcher == null) return;
         Application.Current.Dispatcher.Invoke(() =>
         {
             ShowToast("✓ " + message, ToastType.Success, filePath);
@@ -40,6 +41,7 @@ public class NotificationService
     {
         SystemSounds.Hand.Play();
 
+        if (Application.Current?.Dispatcher == null) return;
         Application.Current.Dispatcher.Invoke(() =>
         {
             ShowToast("✗ " + message, ToastType.Error);
@@ -53,6 +55,7 @@ public class NotificationService
     {
         SystemSounds.Asterisk.Play();
 
+        if (Application.Current?.Dispatcher == null) return;
         Application.Current.Dispatcher.Invoke(() =>
         {
             ShowToast("✓ 클립보드에 복사됨", ToastType.Info);
