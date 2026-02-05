@@ -15,6 +15,7 @@ public class ChromeCaptureService
 {
     private readonly HttpClient _httpClient = new();
     private const int DefaultDebugPort = 9222;
+    private int _commandId;
 
     /// <summary>
     /// 캡처 진행 상태 이벤트
@@ -28,20 +29,16 @@ public class ChromeCaptureService
     {
         try
         {
-            // 1. Chrome 디버그 포트 연결 확인
             StatusChanged?.Invoke("Chrome 연결 중...");
             var wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort);
 
             if (string.IsNullOrEmpty(wsUrl))
             {
                 StatusChanged?.Invoke("Chrome 디버그 모드 시작 중...");
-                // Chrome이 디버그 모드로 실행되지 않은 경우
                 if (!await StartChromeWithDebugging(debugPort))
-                {
                     return null;
-                }
 
-                await Task.Delay(2000); // Chrome 시작 대기
+                await Task.Delay(2000);
                 wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort);
 
                 if (string.IsNullOrEmpty(wsUrl))
@@ -51,12 +48,10 @@ public class ChromeCaptureService
                 }
             }
 
-            // 2. WebSocket으로 CDP 연결
             StatusChanged?.Invoke("페이지 캡처 중...");
             using var ws = new ClientWebSocket();
             await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-            // 3. 전체 페이지 스크린샷 요청
             var screenshotResult = await SendCdpCommandAsync(ws, "Page.captureScreenshot", new
             {
                 format = "png",
@@ -70,12 +65,9 @@ public class ChromeCaptureService
                 return null;
             }
 
-            // 4. Base64 디코딩하여 Bitmap 생성
             var base64Data = screenshotResult.Value.GetProperty("data").GetString();
             if (string.IsNullOrEmpty(base64Data))
-            {
                 return null;
-            }
 
             var imageBytes = Convert.FromBase64String(base64Data);
             using var ms = new MemoryStream(imageBytes);
@@ -103,11 +95,8 @@ public class ChromeCaptureService
 
             if (string.IsNullOrEmpty(wsUrl))
             {
-                // Chrome이 디버그 모드로 실행되지 않은 경우 자동 시작
                 if (!await StartChromeWithDebugging(debugPort))
-                {
                     return null;
-                }
 
                 wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort);
                 if (string.IsNullOrEmpty(wsUrl))
@@ -120,69 +109,75 @@ public class ChromeCaptureService
             using var ws = new ClientWebSocket();
             await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-            // 1. 레이아웃 메트릭스 가져오기 (전체 페이지 크기)
             StatusChanged?.Invoke("페이지 크기 측정 중...");
             var layoutMetrics = await SendCdpCommandAsync(ws, "Page.getLayoutMetrics", new { });
 
             if (layoutMetrics == null || !layoutMetrics.HasValue)
-            {
                 return null;
-            }
 
             var contentSize = layoutMetrics.Value.GetProperty("contentSize");
             var fullWidth = contentSize.GetProperty("width").GetDouble();
             var fullHeight = contentSize.GetProperty("height").GetDouble();
 
-            // 2. 디바이스 메트릭스 오버라이드 (전체 페이지 크기로 설정)
+            // 매우 큰 페이지는 키보드 스크롤 캡처로 전환
+            if (fullHeight > 8000)
+            {
+                StatusChanged?.Invoke("긴 페이지 감지 - 스크롤 캡처로 전환...");
+                return await CaptureWithKeyboardScrollAsync(debugPort);
+            }
+
             StatusChanged?.Invoke($"전체 페이지 캡처 중... ({fullWidth}x{fullHeight})");
 
-            // 에뮬레이션으로 뷰포트 크기 설정
-            await SendCdpCommandAsync(ws, "Emulation.setDeviceMetricsOverride", new
+            try
             {
-                mobile = false,
-                width = (int)fullWidth,
-                height = (int)fullHeight,
-                deviceScaleFactor = 1
-            });
-
-            await Task.Delay(500); // 렌더링 대기
-
-            // 3. 전체 페이지 스크린샷
-            var screenshotResult = await SendCdpCommandAsync(ws, "Page.captureScreenshot", new
-            {
-                format = "png",
-                captureBeyondViewport = true,
-                fromSurface = true,
-                clip = new
+                await SendCdpCommandAsync(ws, "Emulation.setDeviceMetricsOverride", new
                 {
-                    x = 0,
-                    y = 0,
-                    width = fullWidth,
-                    height = fullHeight,
-                    scale = 1
+                    mobile = false,
+                    width = (int)fullWidth,
+                    height = (int)fullHeight,
+                    deviceScaleFactor = 1
+                });
+
+                await Task.Delay(500);
+
+                var screenshotResult = await SendCdpCommandAsync(ws, "Page.captureScreenshot", new
+                {
+                    format = "png",
+                    captureBeyondViewport = true,
+                    fromSurface = true,
+                    clip = new
+                    {
+                        x = 0,
+                        y = 0,
+                        width = fullWidth,
+                        height = fullHeight,
+                        scale = 1
+                    }
+                });
+
+                if (screenshotResult == null || !screenshotResult.HasValue)
+                    return null;
+
+                var base64Data = screenshotResult.Value.GetProperty("data").GetString();
+                if (string.IsNullOrEmpty(base64Data))
+                    return null;
+
+                var imageBytes = Convert.FromBase64String(base64Data);
+                using var ms = new MemoryStream(imageBytes);
+                var bitmap = new Bitmap(ms);
+
+                StatusChanged?.Invoke("캡처 완료");
+                return bitmap;
+            }
+            finally
+            {
+                // 예외 발생 시에도 뷰포트 복원 보장
+                try
+                {
+                    await SendCdpCommandAsync(ws, "Emulation.clearDeviceMetricsOverride", new { });
                 }
-            });
-
-            // 4. 에뮬레이션 해제
-            await SendCdpCommandAsync(ws, "Emulation.clearDeviceMetricsOverride", new { });
-
-            if (screenshotResult == null || !screenshotResult.HasValue)
-            {
-                return null;
+                catch { }
             }
-
-            var base64Data = screenshotResult.Value.GetProperty("data").GetString();
-            if (string.IsNullOrEmpty(base64Data))
-            {
-                return null;
-            }
-
-            var imageBytes = Convert.FromBase64String(base64Data);
-            using var ms = new MemoryStream(imageBytes);
-            var bitmap = new Bitmap(ms);
-
-            StatusChanged?.Invoke("캡처 완료");
-            return bitmap;
         }
         catch (Exception ex)
         {
@@ -203,7 +198,6 @@ public class ChromeCaptureService
 
             if (tabs != null && tabs.Length > 0)
             {
-                // 특정 URL을 가진 탭을 찾기
                 if (!string.IsNullOrEmpty(targetUrl))
                 {
                     var targetUrlBase = targetUrl.Split('?')[0].Split('#')[0];
@@ -224,7 +218,6 @@ public class ChromeCaptureService
                     }
                 }
 
-                // 첫 번째 페이지 탭의 WebSocket URL 반환
                 foreach (var tab in tabs)
                 {
                     if (tab.TryGetProperty("type", out var type) &&
@@ -251,7 +244,6 @@ public class ChromeCaptureService
     {
         try
         {
-            // Chrome 실행 경로 찾기
             var chromePaths = new[]
             {
                 @"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -276,15 +268,11 @@ public class ChromeCaptureService
                 return false;
             }
 
-            // 별도의 사용자 데이터 디렉토리로 디버그 모드 Chrome 실행
-            // 기존 Chrome 프로세스에 영향을 주지 않음
             var debugUserDataDir = Path.Combine(Path.GetTempPath(), "SmartCapture_ChromeDebug");
 
             var arguments = $"--remote-debugging-port={port} --user-data-dir=\"{debugUserDataDir}\" --no-first-run --no-default-browser-check";
             if (!string.IsNullOrEmpty(url))
-            {
                 arguments += $" \"{url}\"";
-            }
 
             var startInfo = new ProcessStartInfo
             {
@@ -296,7 +284,6 @@ public class ChromeCaptureService
             StatusChanged?.Invoke("디버그 모드 Chrome 시작 중...");
             Process.Start(startInfo);
 
-            // Chrome 시작 대기 (최대 10초)
             for (int i = 0; i < 20; i++)
             {
                 await Task.Delay(500);
@@ -319,13 +306,13 @@ public class ChromeCaptureService
     }
 
     /// <summary>
-    /// CDP 명령 전송
+    /// CDP 명령 전송 (id 매칭 + 타임아웃)
     /// </summary>
     private async Task<JsonElement?> SendCdpCommandAsync(ClientWebSocket ws, string method, object parameters)
     {
         try
         {
-            var messageId = Random.Shared.Next(1, 100000);
+            var messageId = Interlocked.Increment(ref _commandId);
             var message = new
             {
                 id = messageId,
@@ -337,27 +324,27 @@ public class ChromeCaptureService
             var bytes = Encoding.UTF8.GetBytes(json);
             await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
 
-            // 응답 대기
-            var buffer = new byte[1024 * 1024]; // 1MB 버퍼 (큰 이미지용)
-            var result = new StringBuilder();
+            // 15초 타임아웃으로 응답 대기
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
-            while (true)
+            while (!cts.Token.IsCancellationRequested)
             {
-                var response = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                result.Append(Encoding.UTF8.GetString(buffer, 0, response.Count));
+                var fullMessage = await ReceiveFullMessageAsync(ws, cts.Token);
+                var responseJson = JsonSerializer.Deserialize<JsonElement>(fullMessage);
 
-                if (response.EndOfMessage)
+                // id가 일치하는 응답만 처리 (이벤트 메시지는 건너뛰기)
+                if (responseJson.TryGetProperty("id", out var idProp) && idProp.GetInt32() == messageId)
                 {
-                    break;
+                    if (responseJson.TryGetProperty("result", out var resultElement))
+                        return resultElement;
+                    return null; // 에러 응답
                 }
+                // id 불일치 → 이벤트 메시지, 다음 메시지 대기
             }
-
-            var responseJson = JsonSerializer.Deserialize<JsonElement>(result.ToString());
-
-            if (responseJson.TryGetProperty("result", out var resultElement))
-            {
-                return resultElement;
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 타임아웃
         }
         catch
         {
@@ -365,6 +352,24 @@ public class ChromeCaptureService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// WebSocket에서 완전한 메시지 하나를 수신
+    /// </summary>
+    private async Task<string> ReceiveFullMessageAsync(ClientWebSocket ws, CancellationToken ct)
+    {
+        var buffer = new byte[64 * 1024]; // 64KB 버퍼
+        var result = new StringBuilder();
+
+        while (true)
+        {
+            var response = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+            result.Append(Encoding.UTF8.GetString(buffer, 0, response.Count));
+            if (response.EndOfMessage) break;
+        }
+
+        return result.ToString();
     }
 
     /// <summary>
@@ -377,25 +382,37 @@ public class ChromeCaptureService
     }
 
     /// <summary>
-    /// URL을 지정하여 Chrome 전체 페이지 캡처 (자동으로 Chrome 시작)
+    /// URL을 지정하여 Chrome 전체 페이지 캡처 (기존 Chrome 재사용)
     /// </summary>
     public async Task<Bitmap?> CaptureUrlAsync(string url, int debugPort = DefaultDebugPort)
     {
         try
         {
-            StatusChanged?.Invoke("Chrome 시작 중...");
+            StatusChanged?.Invoke("Chrome 연결 확인 중...");
 
-            // 디버그 모드 Chrome 시작 (URL 포함)
-            if (!await StartChromeWithDebugging(debugPort, url))
+            // 1. 기존 디버그 Chrome이 있는지 확인
+            var wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort);
+
+            if (!string.IsNullOrEmpty(wsUrl))
             {
-                return null;
+                // 기존 Chrome에서 URL 네비게이션
+                StatusChanged?.Invoke("기존 Chrome에서 페이지 로딩 중...");
+                using var ws = new ClientWebSocket();
+                await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
+                await SendCdpCommandAsync(ws, "Page.navigate", new { url });
+                await Task.Delay(3000); // 로딩 대기
+            }
+            else
+            {
+                // 새 Chrome 시작
+                StatusChanged?.Invoke("Chrome 시작 중...");
+                if (!await StartChromeWithDebugging(debugPort, url))
+                    return null;
+
+                await Task.Delay(3000);
             }
 
-            // 페이지 로딩 대기
-            StatusChanged?.Invoke("페이지 로딩 대기 중...");
-            await Task.Delay(3000);
-
-            // Google Sheets 등 동적 콘텐츠는 키보드 스크롤 캡처 사용
+            // Google Sheets/Docs는 키보드 스크롤 캡처
             if (url.Contains("docs.google.com/spreadsheets") ||
                 url.Contains("docs.google.com/document"))
             {
@@ -452,7 +469,6 @@ public class ChromeCaptureService
                 var bitmap = await CaptureViewportAsync(ws);
                 if (bitmap != null)
                 {
-                    // 이전 캡처와 비교하여 변화 없으면 중지
                     long currentHash = GetImageHash(bitmap);
                     if (lastHash != null && currentHash == lastHash)
                     {
@@ -477,7 +493,6 @@ public class ChromeCaptureService
 
             StatusChanged?.Invoke($"이미지 합성 중... ({captures.Count}장)");
 
-            // 이미지 합성
             Bitmap? result = null;
             try
             {
@@ -488,20 +503,14 @@ public class ChromeCaptureService
                 else
                 {
                     result = StitchImages(captures);
-                    // 합성 후 원본 이미지들 정리
                     foreach (var cap in captures)
-                    {
                         cap.Dispose();
-                    }
                 }
             }
             catch
             {
-                // StitchImages 예외 시 원본 이미지들 정리
                 foreach (var cap in captures)
-                {
                     cap.Dispose();
-                }
                 throw;
             }
 
@@ -594,24 +603,27 @@ public class ChromeCaptureService
     }
 
     /// <summary>
-    /// 이미지 해시 계산 (스크롤 끝 감지용)
+    /// 이미지 해시 계산 (위치 가중, 스크롤 끝 감지용)
     /// </summary>
     private static long GetImageHash(Bitmap bitmap)
     {
-        long hash = 0;
-        int sampleStep = 50;
-
-        // 하단 절반만 샘플링 (상단은 헤더 등 고정 영역일 수 있음)
-        for (int y = bitmap.Height / 2; y < bitmap.Height; y += sampleStep)
+        unchecked
         {
-            for (int x = 0; x < bitmap.Width; x += sampleStep)
-            {
-                var pixel = bitmap.GetPixel(x, y);
-                hash += pixel.R + pixel.G + pixel.B;
-            }
-        }
+            long hash = 17;
+            int sampleStep = 50;
 
-        return hash;
+            for (int y = bitmap.Height / 2; y < bitmap.Height; y += sampleStep)
+            {
+                for (int x = 0; x < bitmap.Width; x += sampleStep)
+                {
+                    var pixel = bitmap.GetPixel(x, y);
+                    hash = hash * 31 + ((long)pixel.R << 16 | (long)pixel.G << 8 | pixel.B);
+                    hash = hash * 31 + (x * 7919L + y * 104729L);
+                }
+            }
+
+            return hash;
+        }
     }
 
     /// <summary>
@@ -619,17 +631,16 @@ public class ChromeCaptureService
     /// </summary>
     private static Bitmap StitchImages(List<Bitmap> captures)
     {
-        int overlap = 150; // 겹치는 픽셀 (헤더/메뉴 영역)
+        int overlap = 150;
         int totalHeight = captures[0].Height + (captures.Count - 1) * (captures[0].Height - overlap);
 
-        // 최대 높이 제한 (16000px)
         var finalImage = new Bitmap(captures[0].Width, Math.Min(totalHeight, 16000));
         using var g = Graphics.FromImage(finalImage);
 
         int y = 0;
         for (int i = 0; i < captures.Count; i++)
         {
-            int srcY = i == 0 ? 0 : overlap; // 첫 번째 이외에는 상단 overlap 제외
+            int srcY = i == 0 ? 0 : overlap;
             int srcHeight = i == 0 ? captures[i].Height : captures[i].Height - overlap;
 
             if (y + srcHeight > finalImage.Height)

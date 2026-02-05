@@ -43,7 +43,7 @@ public partial class MainWindow : Window
         _hotkeyService = new HotkeyService();
         _notificationService = new NotificationService();
         _windowCaptureService = new WindowCaptureService();
-        _scrollCaptureService = new ScrollCaptureService();
+        _scrollCaptureService = new ScrollCaptureService(_captureManager);
         _chromeCaptureService = new ChromeCaptureService();
         _ocrService = new OcrService();
 

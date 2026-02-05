@@ -1,1 +1,1 @@
-🐛 버그 수정: 앱 종료 시 프로세스 잔류 - ShutdownMode + OnExit Environment.Exit + 미처리 예외 핸들러
+🔧 스크롤 캡처 전면 수정: DXGI+PageDown 기반 재구현 + Chrome CDP 안정화(id매칭/타임아웃/Chrome재사용)
