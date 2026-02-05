@@ -93,6 +93,20 @@ public partial class CaptureOverlay : Window
                     new System.Drawing.Size(virtualScreen.Width, virtualScreen.Height),
                     CopyPixelOperation.SourceCopy);
             }
+
+            // 디버그: 캡처된 원본 이미지를 파일로 저장
+            try
+            {
+                var debugDir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "SmartCapture", "Debug");
+                System.IO.Directory.CreateDirectory(debugDir);
+                var debugPath = System.IO.Path.Combine(debugDir, $"overlay_capture_{DateTime.Now:HHmmss}.png");
+                result.Save(debugPath, ImageFormat.Png);
+                Services.Capture.CaptureLogger.Info("CaptureOverlay", $"디버그 이미지 저장: {debugPath}");
+            }
+            catch { }
+
             return result;
         }
         catch
@@ -145,6 +159,7 @@ public partial class CaptureOverlay : Window
         _isSelecting = true;
 
         HelpPanel.Visibility = Visibility.Collapsed;
+        DimOverlay.Visibility = Visibility.Visible;
 
         SelectionBorder.Visibility = Visibility.Visible;
         SizeLabel.Visibility = Visibility.Visible;
