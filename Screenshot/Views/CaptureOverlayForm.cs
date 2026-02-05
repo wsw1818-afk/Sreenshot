@@ -64,8 +64,10 @@ public class CaptureOverlayForm : Form
 
         _capturedScreen = capturedScreen;
 
-        // 배경 이미지 복사 (원본 보존)
+        // 배경 이미지 복사 (원본 보존) + DPI를 96으로 강제 설정
+        // CopyFromScreen이 120 DPI로 태그하면 DrawImageUnscaled가 스케일링하므로 96으로 통일
         _backgroundBitmap = new Bitmap(capturedScreen);
+        _backgroundBitmap.SetResolution(96f, 96f);
 
         // Form 설정
         FormBorderStyle = FormBorderStyle.None;
@@ -94,7 +96,10 @@ public class CaptureOverlayForm : Form
         };
 
         Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-            $"WinForms 오버레이 생성: Screen={_screenX},{_screenY},{_screenWidth}x{_screenHeight}, BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}");
+            $"WinForms 오버레이 생성: Screen={_screenX},{_screenY},{_screenWidth}x{_screenHeight}, " +
+            $"BG={_backgroundBitmap.Width}x{_backgroundBitmap.Height}, " +
+            $"OrigDPI={capturedScreen.HorizontalResolution:F0}x{capturedScreen.VerticalResolution:F0}, " +
+            $"ForcedDPI={_backgroundBitmap.HorizontalResolution:F0}x{_backgroundBitmap.VerticalResolution:F0}");
     }
 
     /// <summary>
