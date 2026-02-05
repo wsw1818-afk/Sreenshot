@@ -225,6 +225,9 @@ public class CaptureOverlayForm : Form
             g.DrawImageUnscaled(_backgroundBitmap, 0, 0);
         }
 
+        // 배경 그린 후 알파 블렌딩 모드로 복원 (반투명 오버레이용)
+        g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+
         if (_showHelp)
         {
             DrawHelpPanel(g);
