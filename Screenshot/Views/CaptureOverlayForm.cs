@@ -119,11 +119,17 @@ public class CaptureOverlayForm : Form
         // 포커스 상실 시 Win32 API로 강제 최상단 복귀
         Deactivate += (s, e) =>
         {
-            Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Deactivate 발생 - Win32 최상단 복귀");
-            if (!IsDisposed && !_closingByUser)
+            try
             {
+                if (IsDisposed || _closingByUser || !IsHandleCreated) return;
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Deactivate 발생 - Win32 최상단 복귀");
                 SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
                 SetForegroundWindow(Handle);
+            }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", $"Deactivate 처리 중 예외: {ex.Message}");
             }
         };
 
