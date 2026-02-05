@@ -12,9 +12,9 @@
     <AssemblyName>SmartCapture</AssemblyName>
     <RootNamespace>Screenshot</RootNamespace>
 
-    <!-- Per-Monitor DPI Awareness V2 -->
+    <!-- DPI Awareness: SystemAware (AllowsTransparency 호환성) -->
     <WindowsPackageType>None</WindowsPackageType>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     
     <!-- WinRT 캡처용 설정 -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
