@@ -1,1 +1,1 @@
-🔙 롤백: 영역 캡처를 잘 작동하던 원본(fb0e0dc)으로 완전 복원
+🐛 버그 수정: 영역 캡처 오버레이 - AllowsTransparency 제거, Stretch=Fill로 하드웨어 렌더링 사용

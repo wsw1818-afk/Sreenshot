@@ -3,8 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="영역 선택"
         WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Black"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
@@ -16,7 +14,7 @@
 
     <Grid>
         <!-- 캡처된 화면 배경 -->
-        <Image x:Name="BackgroundImage" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+        <Image x:Name="BackgroundImage" Stretch="Fill"/>
 
         <!-- 어두운 오버레이 (선택 영역 제외) -->
         <Rectangle x:Name="DimOverlay" Fill="#80000000"/>

@@ -57,15 +57,24 @@ public partial class CaptureOverlay : Window
         // 배경 이미지 설정
         var bitmapSource = ConvertToBitmapSource(_capturedScreen);
         BackgroundImage.Source = bitmapSource;
-        BackgroundImage.Width = _screenWidth;
-        BackgroundImage.Height = _screenHeight;
 
-        // 창 설정
+        // 창 설정 - 전체 화면으로 표시
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = _screenX;
         Top = _screenY;
         Width = _screenWidth;
         Height = _screenHeight;
+        WindowState = WindowState.Normal;
+
+        // Loaded 이벤트에서 실제 렌더 크기로 마스크 영역 조정
+        Loaded += (s, e) =>
+        {
+            // DimOverlay의 초기 위치를 실제 렌더 크기에 맞춤
+            var actualW = ActualWidth;
+            var actualH = ActualHeight;
+            Services.Capture.CaptureLogger.DebugLog("CaptureOverlay",
+                $"Loaded: ActualSize={actualW}x{actualH}, 창설정={Width}x{Height}, 이미지={_screenWidth}x{_screenHeight}");
+        };
     }
 
     /// <summary>
@@ -182,14 +191,17 @@ public partial class CaptureOverlay : Window
             return;
         }
 
-        // 반올림으로 정확한 영역 캡처
-        int physicalX = _screenX + (int)Math.Round(x);
-        int physicalY = _screenY + (int)Math.Round(y);
-        int physicalWidth = (int)Math.Round(width);
-        int physicalHeight = (int)Math.Round(height);
+        // WPF 좌표를 이미지 좌표(물리적 픽셀)로 변환
+        double scaleX = (double)_screenWidth / ActualWidth;
+        double scaleY = (double)_screenHeight / ActualHeight;
 
-        _selectedRegion = new Rectangle(physicalX, physicalY, physicalWidth, physicalHeight);
-        _imageRegion = new Rectangle((int)Math.Round(x), (int)Math.Round(y), physicalWidth, physicalHeight);
+        int imgX = (int)Math.Round(x * scaleX);
+        int imgY = (int)Math.Round(y * scaleY);
+        int imgW = (int)Math.Round(width * scaleX);
+        int imgH = (int)Math.Round(height * scaleY);
+
+        _selectedRegion = new Rectangle(_screenX + imgX, _screenY + imgY, imgW, imgH);
+        _imageRegion = new Rectangle(imgX, imgY, imgW, imgH);
 
         DialogResult = true;
         Close();
@@ -197,7 +209,7 @@ public partial class CaptureOverlay : Window
 
     private void UpdateBackgroundMask(double x, double y, double width, double height)
     {
-        var fullRect = new RectangleGeometry(new Rect(0, 0, _screenWidth, _screenHeight));
+        var fullRect = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight));
         var selectionRect = new RectangleGeometry(new Rect(x, y, width, height));
 
         var combinedGeometry = new CombinedGeometry(
