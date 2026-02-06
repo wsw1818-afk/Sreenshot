@@ -122,7 +122,7 @@
 | **영향** | `NullReferenceException` |
 | **해결** | null 체크와 사용을 원자적으로 처리하거나 로컬 변수 사용 |
 
-### 버Bug #48 - Random 객체 반복 생성 (성능)
+### 버그 #48 - Random 객체 반복 생성 (성능)
 | 항목 | 내용 |
 |------|------|
 | **파일** | CaptureManager.cs, DxgiCapture.cs, GdiCapture.cs |

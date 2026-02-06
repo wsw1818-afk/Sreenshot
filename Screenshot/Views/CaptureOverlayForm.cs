@@ -118,7 +118,7 @@ public class CaptureOverlayForm : Form
         KeyDown += OnKeyDown;
         Paint += OnPaint;
 
-        // 포커스 상실 시 Win32 API로 강제 최상단 복귀 + 키보드 포커스 복구
+        // 포커스 상실 시: 복구 시도 1회 → 실패하면 즉시 취소 (먹통 방지)
         Deactivate += (s, e) =>
         {
             try
@@ -126,23 +126,23 @@ public class CaptureOverlayForm : Form
                 if (IsDisposed || _closingByUser || !IsHandleCreated) return;
                 _deactivateCount++;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                    $"Deactivate 발생 #{_deactivateCount} - Win32 최상단 복귀");
+                    $"Deactivate 발생 #{_deactivateCount}");
 
-                // 3회 이상 반복 Deactivate → 복구 불가 판단, 자동 취소
-                if (_deactivateCount >= 3)
+                // 2회 이상 반복 Deactivate → 복구 불가 판단, 즉시 취소
+                if (_deactivateCount >= 2)
                 {
                     Services.Capture.CaptureLogger.Warn("CaptureOverlayForm",
-                        "Deactivate 3회 반복 - 포커스 복구 불가, 자동 취소");
+                        "Deactivate 2회 반복 - 포커스 복구 불가, 즉시 취소");
                     _closingByUser = true;
                     DialogResult = DialogResult.Cancel;
                     Close();
                     return;
                 }
 
+                // 1회차: 복구 시도
                 SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
                 SetForegroundWindow(Handle);
 
-                // BeginInvoke로 메시지 큐 처리 후 키보드 포커스 복구
                 BeginInvoke(() =>
                 {
                     try
@@ -150,7 +150,7 @@ public class CaptureOverlayForm : Form
                         if (IsDisposed || _closingByUser) return;
                         Activate();
                         Focus();
-                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "포커스 복구 완료 (Activate+Focus)");
+                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "포커스 복구 시도 완료");
                     }
                     catch (ObjectDisposedException) { }
                 });
@@ -188,14 +188,14 @@ public class CaptureOverlayForm : Form
             }
         };
 
-        // 안전 타이머: 30초 후 자동 취소 (오버레이가 영원히 멈추는 것 방지)
-        _safetyTimer = new System.Windows.Forms.Timer { Interval = 30000 };
+        // 안전 타이머: 10초 후 자동 취소 (오버레이가 먹통 상태 방지)
+        _safetyTimer = new System.Windows.Forms.Timer { Interval = 10000 };
         _safetyTimer.Tick += (s, e) =>
         {
             _safetyTimer?.Stop();
             if (!_closingByUser && !IsDisposed)
             {
-                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", "안전 타이머 만료 (30초) - 자동 취소");
+                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", "안전 타이머 만료 (10초) - 자동 취소");
                 _closingByUser = true;
                 DialogResult = DialogResult.Cancel;
                 Close();
@@ -206,6 +206,10 @@ public class CaptureOverlayForm : Form
         // Shown 이벤트에서 Win32 API로 물리적 크기 강제 + 강제 다시 그리기
         Shown += (s, e) =>
         {
+            // 오버레이가 표시된 시점부터 안전 타이머 시작 (초기화 시간 제외)
+            _safetyTimer?.Stop();
+            _safetyTimer?.Start();
+
             SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
 
             GetWindowRect(Handle, out var rect);
@@ -330,6 +334,9 @@ public class CaptureOverlayForm : Form
     {
         if (e.Button != MouseButtons.Left) return;
         if (!_inputEnabled) return;
+
+        // 사용자가 조작 중이면 안전 타이머 중지
+        _safetyTimer?.Stop();
 
         _startPoint = e.Location;
         _isSelecting = true;

@@ -1,1 +1,1 @@
-🔧 스크롤 캡처 전면 수정: DXGI+PageDown 기반 재구현 + Chrome CDP 안정화(id매칭/타임아웃/Chrome재사용)
+🐛 Deactivate 먹통 개선: 2회 Deactivate 즉시 취소 + 안전 타이머 10초 단축 + 드래그 중 타이머 중지
