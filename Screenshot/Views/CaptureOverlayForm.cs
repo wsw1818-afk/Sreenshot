@@ -22,6 +22,27 @@ public class CaptureOverlayForm : Form
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    // Low-level 키보드 훅 (포커스 상실 시에도 ESC 감지)
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hInstance, uint threadId);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int VK_ESCAPE = 0x1B;
+
+    private IntPtr _keyboardHook;
+    private LowLevelKeyboardProc? _keyboardProc; // prevent GC
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -246,6 +267,9 @@ public class CaptureOverlayForm : Form
             Activate();
             Focus();
 
+            // Low-level 키보드 훅 설치 (포커스가 없어도 ESC 감지)
+            InstallKeyboardHook();
+
             // 마우스 왼쪽 버튼이 떼어진 후에만 입력 활성화 (버튼 클릭 잔여 이벤트 방지)
             Task.Run(async () =>
             {
@@ -448,6 +472,56 @@ public class CaptureOverlayForm : Form
         Close();
     }
 
+    private void InstallKeyboardHook()
+    {
+        if (_keyboardHook != IntPtr.Zero) return;
+
+        _keyboardProc = KeyboardHookCallback;
+        using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
+        using var curModule = curProcess.MainModule!;
+        _keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, _keyboardProc, GetModuleHandle(curModule.ModuleName), 0);
+
+        Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+            $"키보드 훅 설치: {(_keyboardHook != IntPtr.Zero ? "성공" : "실패")}");
+    }
+
+    private void UninstallKeyboardHook()
+    {
+        if (_keyboardHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_keyboardHook);
+            _keyboardHook = IntPtr.Zero;
+            _keyboardProc = null;
+            Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "키보드 훅 해제");
+        }
+    }
+
+    private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN)
+        {
+            int vkCode = Marshal.ReadInt32(lParam);
+            if (vkCode == VK_ESCAPE)
+            {
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Low-level 키보드 훅: ESC 감지");
+
+                // UI 스레드에서 취소 실행
+                if (IsHandleCreated && !IsDisposed && !_closingByUser)
+                {
+                    BeginInvoke(() =>
+                    {
+                        if (IsDisposed || _closingByUser) return;
+                        _closingByUser = true;
+                        DialogResult = DialogResult.Cancel;
+                        Close();
+                    });
+                    return (IntPtr)1; // ESC 키 소비 (다른 앱에 전달 안 함)
+                }
+            }
+        }
+        return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+    }
+
     private Rectangle GetSelectionRect()
     {
         int x = Math.Min(_startPoint.X, _currentPoint.X);
@@ -459,6 +533,8 @@ public class CaptureOverlayForm : Form
 
     protected override void Dispose(bool disposing)
     {
+        UninstallKeyboardHook();
+
         if (disposing)
         {
             _safetyTimer?.Stop();
