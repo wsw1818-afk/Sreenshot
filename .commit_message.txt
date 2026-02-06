@@ -1,1 +1,1 @@
-🐛 버그 수정: ESC 취소 안 먹히는 문제 - Low-level 키보드 훅(WH_KEYBOARD_LL)으로 포커스 무관 ESC 감지 + ProcessCmdKey + Focus() 명시 + 안전타이머 30초 + 우클릭 취소
+✨ 기능 추가: 캡처 히스토리 전체 삭제 버튼 + ESC 취소 Low-level 키보드 훅 수정

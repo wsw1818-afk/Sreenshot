@@ -521,6 +521,7 @@ public partial class MainWindow : Window
 
                 EmptyState.Visibility = Visibility.Collapsed;
                 ThumbnailScrollViewer.Visibility = Visibility.Visible;
+                ClearAllButton.Visibility = Visibility.Visible;
 
                 EngineText.Text = result.EngineName;
                 SizeText.Text = $"{result.Image.Width} x {result.Image.Height}";
@@ -775,6 +776,7 @@ public partial class MainWindow : Window
         {
             EmptyState.Visibility = Visibility.Visible;
             ThumbnailScrollViewer.Visibility = Visibility.Collapsed;
+            ClearAllButton.Visibility = Visibility.Collapsed;
             _selectedCapture = null;
         }
         else
@@ -783,6 +785,27 @@ public partial class MainWindow : Window
         }
 
         StatusText.Text = "삭제됨";
+    }
+
+    private void ClearAllCaptures_Click(object sender, RoutedEventArgs e)
+    {
+        if (_captureHistory.Count == 0) return;
+
+        foreach (var capture in _captureHistory)
+        {
+            capture.Dispose();
+        }
+        _captureHistory.Clear();
+        ThumbnailPanel.Children.Clear();
+
+        _selectedCapture = null;
+        EmptyState.Visibility = Visibility.Visible;
+        ThumbnailScrollViewer.Visibility = Visibility.Collapsed;
+        ClearAllButton.Visibility = Visibility.Collapsed;
+
+        EngineText.Text = "-";
+        SizeText.Text = "-";
+        StatusText.Text = "전체 삭제됨";
     }
 
     private void Thumbnail_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)

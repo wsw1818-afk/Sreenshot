@@ -182,8 +182,20 @@
         <!-- 미리보기 영역 - 가로 스크롤 썸네일 리스트 -->
         <Border Grid.Row="2" Background="#1e1e1e" Padding="20,10">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 전체 삭제 버튼 (캡처 있을 때만 표시) -->
+                <Button x:Name="ClearAllButton" Grid.Row="0"
+                        Content="전체 삭제" Style="{StaticResource SecondaryButton}"
+                        Click="ClearAllCaptures_Click"
+                        HorizontalAlignment="Right" Margin="0,0,0,5"
+                        Visibility="Collapsed" FontSize="11" Padding="10,5"/>
+
                 <!-- 빈 상태 메시지 -->
-                <StackPanel x:Name="EmptyState" HorizontalAlignment="Center"
+                <StackPanel x:Name="EmptyState" Grid.Row="1" HorizontalAlignment="Center"
                             VerticalAlignment="Center">
                     <TextBlock Text="📷" FontSize="48" HorizontalAlignment="Center"
                                Foreground="#555555"/>
@@ -194,7 +206,7 @@
                 </StackPanel>
 
                 <!-- 썸네일 스크롤 영역 -->
-                <ScrollViewer x:Name="ThumbnailScrollViewer"
+                <ScrollViewer x:Name="ThumbnailScrollViewer" Grid.Row="1"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Disabled"
                               VerticalAlignment="Center"
@@ -203,7 +215,7 @@
                 </ScrollViewer>
 
                 <!-- 복사 완료 표시 (오버레이) -->
-                <Border x:Name="CopyOverlay" Background="#80000000" CornerRadius="8"
+                <Border x:Name="CopyOverlay" Grid.Row="1" Background="#80000000" CornerRadius="8"
                         Visibility="Collapsed" IsHitTestVisible="False">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBlock Text="✓" FontSize="48" Foreground="#4CAF50" HorizontalAlignment="Center"/>
