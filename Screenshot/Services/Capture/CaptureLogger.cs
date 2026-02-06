@@ -11,6 +11,7 @@ public static class CaptureLogger
 {
     private static readonly object LockObj = new();
     private static readonly StringBuilder Buffer = new();
+    private static int _lineCount;
     private static LogLevel _minLevel = LogLevel.Debug;
     private static string? _logFilePath;
     private static bool _isEnabled = true;
@@ -75,10 +76,11 @@ public static class CaptureLogger
         lock (LockObj)
         {
             Buffer.AppendLine(logLine);
+            _lineCount++;
             Debug.WriteLine(logLine);
 
             // 10줄마다 파일에 플러시 또는 Error 레벨은 즉시 플러시
-            if (Buffer.Length > 0 && (level >= LogLevel.Error || Buffer.ToString().Split('\n').Length >= 10))
+            if (level >= LogLevel.Error || _lineCount >= 10)
             {
                 FlushToFile();
             }
@@ -255,6 +257,7 @@ public static class CaptureLogger
             {
                 File.AppendAllText(LogFilePath, Buffer.ToString());
                 Buffer.Clear();
+                _lineCount = 0;
             }
             catch (Exception ex)
             {

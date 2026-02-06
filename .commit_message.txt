@@ -1,1 +1,1 @@
-🐛 앱 종료 안되는 버그 수정: OnExplicitShutdown 모드에서 X버튼 종료 시 Shutdown() 미호출 문제 해결
+🐛 버그 수정: CaptureLogger 플러시 성능개선 + WindowCaptureService SelectObject 이중호출 방지 + 토스트 닫기 예외 방어

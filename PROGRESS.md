@@ -4,7 +4,7 @@
 - **프로젝트**: SmartCapture (스크린샷 캡처 도구)
 - **플랫폼**: Windows 10/11 (.NET 8.0)
 - **상태**: 버그 수정 완료
-- **마지막 업데이트**: 2026-02-05
+- **마지막 업데이트**: 2026-02-06
 
 ---
 
@@ -34,6 +34,9 @@
 | #49 | AppSettings.cs, SettingsWindow.xaml.cs | `OpenEditorAfterCapture` 데드코드 제거, SettingsWindow가 `AutoOpenEditor` 사용하도록 수정 (설정↔동작 불일치 해결) | 현재 |
 | #50 | NotificationService.cs | `HideToast`에 try/catch 추가: 애니메이션 중 창 닫힘 시 `InvalidOperationException` 방어 | 현재 |
 | #55 | ScrollCaptureService.cs | finally 블록에서 `captures.Count == 1` 예외 시 Dispose 누수 수정 (Clear로 소유권 이전) | 현재 |
+| #57 | CaptureLogger.cs | `Buffer.ToString().Split('\n')` 제거 → `_lineCount` 카운터로 교체 (플러시 성능 개선) | 현재 |
+| #58 | WindowCaptureService.cs | `TryBitBltCapture`에서 `SelectObject` 이중 호출 방지 (`hOld = IntPtr.Zero` 리셋) | 현재 |
+| #59 | NotificationService.cs | `ShowToast()`에서 기존 토스트 닫기 시 예외 방어 (`try { Close(); } catch {}`) | 현재 |
 
 ### 허위/안전으로 확인된 버그
 
@@ -78,6 +81,9 @@
 | #53 | ChromeCaptureService.cs | 허위 | `using var cts` 이미 적용됨 (Line 328) |
 | #54 | ChromeCaptureService.cs | 안전 | HttpClient 인스턴스 수명 = 앱 수명, 재사용 패턴 준수 |
 | #56 | HotkeyService.cs | 안전 | `_source?.RemoveHook`은 null-conditional 연산자로 안전 |
+
+| #60 | HotkeyService.cs | P2 설계 | `RegisterHotkeys()`가 항상 하드코딩된 키를 등록, `_settings`의 단축키 설정 무시. 기본 단축키가 잘 동작하므로 우선순위 낮음 |
+| #61 | CaptureLogger.cs | P3 설계 | 앱 실행마다 새 로그 파일 생성, 오래된 로그 정리 메커니즘 없음 |
 
 ---
 
@@ -224,3 +230,6 @@
 - [ ] Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
 - [ ] 스크롤 캡처 (일반 + Chrome CDP) 실제 환경 테스트
 - [x] 버그 #42~#56 검증 완료 (3건 수정, 12건 허위/안전)
+- [x] 버그 #57~#59 수정 완료 (Logger 성능, SelectObject 이중호출, 토스트 예외)
+- [ ] (#60) HotkeyService에서 사용자 설정 단축키 반영 (하드코딩 → 설정 읽기)
+- [ ] (#61) 로그 파일 자동 정리 (7일 이상 된 로그 삭제)

@@ -67,7 +67,8 @@ public class NotificationService
     private void ShowToast(string message, ToastType type, string? filePath = null)
     {
         // 기존 토스트 닫기
-        _toastWindow?.Close();
+        try { _toastWindow?.Close(); } catch { }
+        _toastWindow = null;
         _hideTimer?.Stop();
 
         // 토스트 윈도우 생성

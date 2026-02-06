@@ -256,6 +256,7 @@ public class WindowCaptureService
             BitBlt(hdcMem, 0, 0, bounds.Width, bounds.Height, hdcWindow, 0, 0, SRCCOPY);
 
             SelectObject(hdcMem, hOld);
+            hOld = IntPtr.Zero; // finally에서 이중 호출 방지
             return Image.FromHbitmap(hBitmap);
         }
         catch
