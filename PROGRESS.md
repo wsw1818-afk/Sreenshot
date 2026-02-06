@@ -66,5 +66,148 @@
 
 ---
 
+## 신규 발견 버그 (2026-02-06)
+
+### 버그 #42 - CaptureManager 누락 메서드
+| 항목 | 내용 |
+|------|------|
+| **파일** | MainWindow.xaml.cs |
+| **위치** | Line 1000 |
+| **문제** | `CaptureMonitorAsync(monitorIndex)` 메서드가 호출되지만 정의되지 않음 |
+| **영향** | 모니터 선택 메뉴 클릭 시 컴파일 오류 또는 런타임 예외 |
+| **해결** | `CaptureManager`에 `CaptureMonitorAsync` 메서드 추가 필요 (현재는 `CaptureFullScreenAsync` 등만 존재) |
+
+### 버그 #43 - OCR 결과 UI 스레드 문제
+| 항목 | 내용 |
+|------|------|
+| **파일** | MainWindow.xaml.cs |
+| **위치** | Line 746-765 |
+| **문제** | `ExtractTextAsync`에서 OCR 성공 후 `MessageBox.Show`가 UI 스레드가 아닌 백그라운드 스레드에서 실행될 수 있음 |
+| **영향** | 간헐적인 UI 예외 또는 메시지 박스 표시 실패 |
+| **해결** | `Dispatcher.Invoke`로 MessageBox 호출 감싸기 |
+
+### 버그 #44 - ImageEditor BitmapSource 변환 문제
+| 항목 | 내용 |
+|------|------|
+| **파일** | ImageEditorWindow.xaml.cs |
+| **위치** | Line 88-102 |
+| **문제** | `ConvertToBitmapSource`에서 `MemoryStream`을 `using`으로 처리하여 `BitmapImage`가 유효하지 않은 스트림 참조 가능 |
+| **영향** | 이미지 표시 실패 또는 메모리 액세스 위반 |
+| **해결** | `BitmapCacheOption.OnLoad`는 설정되어 있으나, 스트림을 닫기 전 `Freeze()` 호출 확인 필요 |
+
+### 버그 #45 - ScrollCapture 리소스 관리 문제
+| 항목 | 내용 |
+|------|------|
+| **파일** | ScrollCaptureService.cs |
+| **위치** | Line 165-200 |
+| **문제** | `CaptureClientAreaAsync`에서 `rawResult.Image`를 `using var`로 처리하지만, `Clone()` 결과는 새 객체이므로 원본이 Dispose됨 |
+| **영향** | 일부 상황에서 이미지 데이터 손상 가능 |
+| **해결** | `using` 제거하거나 명시적인 리소스 관리 필요 |
+
+### 버그 #46 - ChromeCapture URL 파라미터 누락
+| 항목 | 내용 |
+|------|------|
+| **파일** | ChromeCaptureService.cs |
+| **위치** | Line 387-430 |
+| **문제** | `CaptureUrlAsync`에서 `targetUrl`을 받지만, 기존 Chrome 연결 시 `GetWebSocketDebuggerUrlAsync`에 `url` 파라미터를 전달하지 않음 |
+| **영향** | 올바른 탭을 찾지 못해 잘못된 페이지 캡처 가능 |
+| **해결** | Line 394에서 `GetWebSocketDebuggerUrlAsync(debugPort, targetUrl)`로 수정 |
+
+### 버그 #47 - DxgiCapture Race Condition
+| 항목 | 내용 |
+|------|------|
+| **파일** | DxgiCapture.cs |
+| **위치** | Line 315-316 |
+| **문제** | `_device` null 체크 후 사용까지 시간차가 있어 멀티스레드 환경에서 null 참조 가능 |
+| **영향** | `NullReferenceException` |
+| **해결** | null 체크와 사용을 원자적으로 처리하거나 로컬 변수 사용 |
+
+### 버Bug #48 - Random 객체 반복 생성 (성능)
+| 항목 | 내용 |
+|------|------|
+| **파일** | CaptureManager.cs, DxgiCapture.cs, GdiCapture.cs |
+| **위치** | `IsBlackImage` 메서드 |
+| **문제** | `Random` 객체가 메서드 호출마다 새로 생성됨 (성능 저하) |
+| **영향** | GC 부하 증가, 캡처 성능 저하 |
+| **해결** | `Random`을 스레드별 또는 인스턴스 변수로 재사용 |
+
+### 버그 #49 - 중복 설정 항목
+| 항목 | 내용 |
+|------|------|
+| **파일** | AppSettings.cs |
+| **위치** | Line 59, 104 |
+| **문제** | `OpenEditorAfterCapture`와 `AutoOpenEditor`가 중복된 의미의 설정 |
+| **영향** | 설정 불일치, 사용자 혼란 |
+| **해결** | 하나로 통합하고 다른 하나는 obsolete 처리 |
+
+### 버그 #50 - NotificationService 애니메이션 예외
+| 항목 | 내용 |
+|------|------|
+| **파일** | NotificationService.cs |
+| **위치** | Line 175-186 |
+| **문제** | `HideToast`에서 애니메이션 진행 중 창이 닫히면 `InvalidOperationException` 가능 |
+| **영향** | 간헐적인 크래시 |
+| **해결** | 애니메이션 완료 후 창 닫기 또는 예외 처리 추가 |
+
+### 버그 #51 - CaptureResult 생성자 누락 필드
+| 항목 | 내용 |
+|------|------|
+| **파일** | MainWindow.xaml.cs |
+| **위치** | Line 200-206 |
+| **문제** | `CaptureResult` 생성 시 `CapturedAt` 필드가 설정되지 않음 |
+| **영향** | 타임스탬프 정보 누락 |
+| **해결** | `CapturedAt = DateTime.Now` 추가 |
+
+### 버그 #52 - ImageEditor Undo/Redo 예외 처리
+| 항목 | 내용 |
+|------|------|
+| **파일** | ImageEditorWindow.xaml.cs |
+| **위치** | Line 556-574 |
+| **문제** | `Undo_Click`/`Redo_Click`에서 `_editedImage.Dispose()` 후 예외 발생 시 null 참조 가능 |
+| **영향** | 이후 작업 실패 |
+| **해결** | try-catch로 예외 처리 및 `_editedImage` 복원 |
+
+### 버그 #53 - CancellationTokenSource Dispose 누락
+| 항목 | 내용 |
+|------|------|
+| **파일** | ChromeCaptureService.cs |
+| **위치** | Line 328-343 |
+| **문제** | `SendCdpCommandAsync`에서 생성된 `CancellationTokenSource`가 모든 경로에서 Dispose되지 않을 수 있음 |
+| **영향** | 메모리 누수 |
+| **해결** | `using var cts`로 변경 |
+
+### 버그 #54 - HttpClient 재사용 권장 패턴 위반
+| 항목 | 내용 |
+|------|------|
+| **파일** | ChromeCaptureService.cs |
+| **위치** | Line 16 |
+| **문제** | `HttpClient`를 인스턴스 필드로 가지지만 `IDisposable` 구현하지 않음 |
+| **영향** | 소켓 고갈 (소켓 연결 유지) |
+| **해결** | `IHttpClientFactory` 사용 또는 정적 `HttpClient` 인스턴스 사용 권장 |
+
+### 버그 #55 - ScrollCapture finally 블록 로직 오류
+| 항목 | 내용 |
+|------|------|
+| **파일** | ScrollCaptureService.cs |
+| **위치** | Line 152-159 |
+| **문제** | `captures.Count > 1`일 때만 Dispose하는데, 예외 발생 시 Count가 1이어도 Dispose 필요 |
+| **영향** | 예외 시 메모리 누수 |
+| **해결** | `captures.Count >= 1`로 수정 또는 별도 예외 처리 |
+
+### 버그 #56 - HotkeyService Dispose 순서
+| 항목 | 내용 |
+|------|------|
+| **파일** | HotkeyService.cs |
+| **위치** | Line 150-155 |
+| **문제** | `Dispose`에서 `UnregisterHotkeys` 후 `_source.RemoveHook` 호출하지만, `_source`가 null일 수 있음 |
+| **영향** | `NullReferenceException` |
+| **해결** | null 체크 추가 |
+
+---
+
 ## 다음 할 일
-- Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
+- [ ] 버그 #42: CaptureMonitorAsync 메서드 구현
+- [ ] 버그 #46: ChromeCapture URL 파라미터 전달 수정
+- [ ] 버그 #48: Random 객체 재사용으로 성능 개선
+- [ ] 버그 #49: 중복 설정 항목 통합
+- [ ] Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
