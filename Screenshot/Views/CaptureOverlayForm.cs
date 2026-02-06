@@ -241,6 +241,11 @@ public class CaptureOverlayForm : Form
             Invalidate();
             Update();
 
+            // 키보드 포커스 명시적 설정 (FormBorderStyle.None에서 자동 포커스 안 받는 문제 해결)
+            SetForegroundWindow(Handle);
+            Activate();
+            Focus();
+
             // 마우스 왼쪽 버튼이 떼어진 후에만 입력 활성화 (버튼 클릭 잔여 이벤트 방지)
             Task.Run(async () =>
             {
@@ -329,6 +334,27 @@ public class CaptureOverlayForm : Form
         g.DrawString(t1, _helpFont, Brushes.White, px + (pw - s1.Width) / 2, py + 15);
         using var gray = new SolidBrush(Color.FromArgb(136, 136, 136));
         g.DrawString(t2, _helpSubFont, gray, px + (pw - s2.Width) / 2, py + 15 + s1.Height + 10);
+    }
+
+    // ProcessCmdKey: KeyDown보다 상위 레벨에서 키를 잡음 → 포커스 문제 시에도 ESC 확실히 처리
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            _closingByUser = true;
+            DialogResult = DialogResult.Cancel;
+            Close();
+            return true;
+        }
+        if (keyData == Keys.Enter)
+        {
+            _closingByUser = true;
+            _selectedRegion = new Rectangle(_screenX, _screenY, _screenWidth, _screenHeight);
+            DialogResult = DialogResult.OK;
+            Close();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)

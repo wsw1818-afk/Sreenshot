@@ -1,1 +1,1 @@
-🐛 버그 수정: 캡처 취소 안 먹히는 문제 - 안전타이머 30초 연장 + Deactivate 내성 강화(3회) + 드래그 중 Deactivate 무시 + 우클릭 취소 추가
+🐛 버그 수정: ESC 취소 안 먹히는 문제 - ProcessCmdKey 오버라이드 + Shown에서 Focus() 명시 호출 + 안전타이머 30초 + Deactivate 3회 내성 + 우클릭 취소
