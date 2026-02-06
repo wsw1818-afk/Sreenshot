@@ -30,7 +30,7 @@
 | - | CaptureOverlayForm.cs | CaptureScreen() 데드코드 제거 | 이전 |
 | #25 | NotificationService.cs | `Application.Current?.Dispatcher == null` 체크 추가 (3곳) | 현재 |
 | #31 | ImageEditorWindow.xaml.cs | Undo 스택 MaxUndoCount=20 제한 + Redo 스택 Dispose | 현재 |
-| #41 | CaptureOverlayForm.cs | Deactivate 후 포커스 복구(Activate+Focus) + 2회 반복 즉시 취소 + 10초 안전 타이머 + 드래그 중 타이머 중지 | 현재 |
+| #41 | CaptureOverlayForm.cs | Deactivate 후 포커스 복구(Activate+Focus) + **3회** 반복 즉시 취소 + **30초** 안전 타이머 + 드래그 중 Deactivate 무시 + 우클릭 취소 + 조작 시작 시 타이머 완전 해제 | 현재 |
 | #49 | AppSettings.cs, SettingsWindow.xaml.cs | `OpenEditorAfterCapture` 데드코드 제거, SettingsWindow가 `AutoOpenEditor` 사용하도록 수정 (설정↔동작 불일치 해결) | 현재 |
 | #50 | NotificationService.cs | `HideToast`에 try/catch 추가: 애니메이션 중 창 닫힘 시 `InvalidOperationException` 방어 | 현재 |
 | #55 | ScrollCaptureService.cs | finally 블록에서 `captures.Count == 1` 예외 시 Dispose 누수 수정 (Clear로 소유권 이전) | 현재 |

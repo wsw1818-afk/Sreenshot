@@ -118,28 +118,46 @@ public class CaptureOverlayForm : Form
         KeyDown += OnKeyDown;
         Paint += OnPaint;
 
-        // 포커스 상실 시: 복구 시도 1회 → 실패하면 즉시 취소 (먹통 방지)
+        // 포커스 상실 시: 복구 시도 → 3회 이상 반복 시 즉시 취소 (먹통 방지)
         Deactivate += (s, e) =>
         {
             try
             {
                 if (IsDisposed || _closingByUser || !IsHandleCreated) return;
+
+                // 드래그 중에는 Deactivate 무시 (마우스 조작으로 인한 일시적 포커스 상실)
+                if (_isSelecting)
+                {
+                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "드래그 중 Deactivate 무시");
+                    BeginInvoke(() =>
+                    {
+                        try
+                        {
+                            if (IsDisposed || _closingByUser) return;
+                            SetForegroundWindow(Handle);
+                            Activate();
+                        }
+                        catch (ObjectDisposedException) { }
+                    });
+                    return;
+                }
+
                 _deactivateCount++;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
                     $"Deactivate 발생 #{_deactivateCount}");
 
-                // 2회 이상 반복 Deactivate → 복구 불가 판단, 즉시 취소
-                if (_deactivateCount >= 2)
+                // 3회 이상 반복 Deactivate → 복구 불가 판단, 즉시 취소
+                if (_deactivateCount >= 3)
                 {
                     Services.Capture.CaptureLogger.Warn("CaptureOverlayForm",
-                        "Deactivate 2회 반복 - 포커스 복구 불가, 즉시 취소");
+                        "Deactivate 3회 반복 - 포커스 복구 불가, 즉시 취소");
                     _closingByUser = true;
                     DialogResult = DialogResult.Cancel;
                     Close();
                     return;
                 }
 
-                // 1회차: 복구 시도
+                // 복구 시도
                 SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
                 SetForegroundWindow(Handle);
 
@@ -188,14 +206,14 @@ public class CaptureOverlayForm : Form
             }
         };
 
-        // 안전 타이머: 10초 후 자동 취소 (오버레이가 먹통 상태 방지)
-        _safetyTimer = new System.Windows.Forms.Timer { Interval = 10000 };
+        // 안전 타이머: 30초 후 자동 취소 (오버레이가 먹통 상태 방지)
+        _safetyTimer = new System.Windows.Forms.Timer { Interval = 30000 };
         _safetyTimer.Tick += (s, e) =>
         {
             _safetyTimer?.Stop();
             if (!_closingByUser && !IsDisposed)
             {
-                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", "안전 타이머 만료 (10초) - 자동 취소");
+                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", "안전 타이머 만료 (30초) - 자동 취소");
                 _closingByUser = true;
                 DialogResult = DialogResult.Cancel;
                 Close();
@@ -332,11 +350,22 @@ public class CaptureOverlayForm : Form
 
     private void OnMouseDown(object? sender, MouseEventArgs e)
     {
+        // 우클릭으로 취소
+        if (e.Button == MouseButtons.Right)
+        {
+            _closingByUser = true;
+            DialogResult = DialogResult.Cancel;
+            Close();
+            return;
+        }
+
         if (e.Button != MouseButtons.Left) return;
         if (!_inputEnabled) return;
 
-        // 사용자가 조작 중이면 안전 타이머 중지
+        // 사용자가 조작을 시작하면 안전 타이머 완전 해제
         _safetyTimer?.Stop();
+        _safetyTimer?.Dispose();
+        _safetyTimer = null;
 
         _startPoint = e.Location;
         _isSelecting = true;
