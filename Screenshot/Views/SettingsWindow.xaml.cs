@@ -70,7 +70,7 @@ public partial class SettingsWindow : Window
         AutoSaveCheckBox.IsChecked = _settings.AutoSave;
         CopyToClipboardCheckBox.IsChecked = _settings.CopyToClipboard;
         PlaySoundCheckBox.IsChecked = _settings.PlaySound;
-        OpenEditorCheckBox.IsChecked = _settings.OpenEditorAfterCapture;
+        OpenEditorCheckBox.IsChecked = _settings.AutoOpenEditor;
 
         // X 버튼 동작 (RadioButton)
         CloseToTrayRadio.IsChecked = _settings.MinimizeToTray;
@@ -120,7 +120,7 @@ public partial class SettingsWindow : Window
         _settings.AutoSave = AutoSaveCheckBox.IsChecked ?? true;
         _settings.CopyToClipboard = CopyToClipboardCheckBox.IsChecked ?? true;
         _settings.PlaySound = PlaySoundCheckBox.IsChecked ?? true;
-        _settings.OpenEditorAfterCapture = OpenEditorCheckBox.IsChecked ?? false;
+        _settings.AutoOpenEditor = OpenEditorCheckBox.IsChecked ?? false;
 
         // X 버튼 동작 (RadioButton)
         _settings.MinimizeToTray = CloseToTrayRadio.IsChecked ?? true;

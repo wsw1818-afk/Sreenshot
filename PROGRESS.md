@@ -30,7 +30,10 @@
 | - | CaptureOverlayForm.cs | CaptureScreen() 데드코드 제거 | 이전 |
 | #25 | NotificationService.cs | `Application.Current?.Dispatcher == null` 체크 추가 (3곳) | 현재 |
 | #31 | ImageEditorWindow.xaml.cs | Undo 스택 MaxUndoCount=20 제한 + Redo 스택 Dispose | 현재 |
-| #41 | CaptureOverlayForm.cs | Deactivate 후 포커스 복구(Activate+Focus) + 3회 반복 시 자동 취소 + 30초 안전 타이머 | 현재 |
+| #41 | CaptureOverlayForm.cs | Deactivate 후 포커스 복구(Activate+Focus) + 2회 반복 즉시 취소 + 10초 안전 타이머 + 드래그 중 타이머 중지 | 현재 |
+| #49 | AppSettings.cs, SettingsWindow.xaml.cs | `OpenEditorAfterCapture` 데드코드 제거, SettingsWindow가 `AutoOpenEditor` 사용하도록 수정 (설정↔동작 불일치 해결) | 현재 |
+| #50 | NotificationService.cs | `HideToast`에 try/catch 추가: 애니메이션 중 창 닫힘 시 `InvalidOperationException` 방어 | 현재 |
+| #55 | ScrollCaptureService.cs | finally 블록에서 `captures.Count == 1` 예외 시 Dispose 누수 수정 (Clear로 소유권 이전) | 현재 |
 
 ### 허위/안전으로 확인된 버그
 
@@ -63,6 +66,18 @@
 | #38 | WinRtCapture.cs | 안전 | interop null 체크 Line 117-119에 있음 |
 | #39 | CaptureManager.cs | 허위 | `_engines`는 초기화 후 불변, UI 스레드 전용 |
 | #40 | GdiCapture.cs | 안전 | finally에서 hBitmap DeleteObject 보장됨 |
+| #42 | MainWindow.xaml.cs | 허위 | `CaptureMonitorAsync`는 MainWindow:1004, CaptureManager:74에 존재 |
+| #43 | MainWindow.xaml.cs | 허위 | `ExtractTextAsync`는 UI스레드 SynchronizationContext에서 실행, await 후 UI 복귀 |
+| #44 | ImageEditorWindow.xaml.cs | 허위 | `BitmapCacheOption.OnLoad` + `Freeze()` 설정됨, 스트림 닫아도 안전 |
+| #45 | ScrollCaptureService.cs | 안전 | `Clone()`은 독립 비트맵 반환, 원본 Dispose 무관 |
+| #46 | ChromeCaptureService.cs | 허위 | 의도적 설계: 아무 탭 연결 후 `Page.navigate`로 URL 이동 |
+| #47 | DxgiCapture.cs | 허위 | UI 스레드 전용, Initialize 후에만 사용, 방어적 null 체크 존재 |
+| #48 | DxgiCapture.cs | P3 성능 | `new Random()` 매번 생성하지만 호출 빈도 낮아 영향 극미 |
+| #51 | CaptureResult.cs | 허위 | `CapturedAt = DateTime.Now` 기본값 이미 존재 (Line 23) |
+| #52 | ImageEditorWindow.xaml.cs | 안전 | Count 체크 후 Pop, Clone/Dispose 순서 올바름 |
+| #53 | ChromeCaptureService.cs | 허위 | `using var cts` 이미 적용됨 (Line 328) |
+| #54 | ChromeCaptureService.cs | 안전 | HttpClient 인스턴스 수명 = 앱 수명, 재사용 패턴 준수 |
+| #56 | HotkeyService.cs | 안전 | `_source?.RemoveHook`은 null-conditional 연산자로 안전 |
 
 ---
 
@@ -206,8 +221,6 @@
 ---
 
 ## 다음 할 일
-- [ ] 버그 #42: CaptureMonitorAsync 메서드 구현
-- [ ] 버그 #46: ChromeCapture URL 파라미터 전달 수정
-- [ ] 버그 #48: Random 객체 재사용으로 성능 개선
-- [ ] 버그 #49: 중복 설정 항목 통합
 - [ ] Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
+- [ ] 스크롤 캡처 (일반 + Chrome CDP) 실제 환경 테스트
+- [x] 버그 #42~#56 검증 완료 (3건 수정, 12건 허위/안전)

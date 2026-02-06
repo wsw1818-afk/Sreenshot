@@ -142,7 +142,9 @@ public class ScrollCaptureService
             // 이미지 합치기
             if (captures.Count == 1)
             {
-                return captures[0];
+                var single = captures[0];
+                captures.Clear(); // finally에서 Dispose되지 않도록 소유권 이전
+                return single;
             }
 
             // Page Down은 대부분 viewport 높이만큼 스크롤 → overlap 힌트는 높이의 15%
@@ -151,11 +153,8 @@ public class ScrollCaptureService
         }
         finally
         {
-            if (captures.Count > 1)
-            {
-                foreach (var cap in captures)
-                    cap.Dispose();
-            }
+            foreach (var cap in captures)
+                cap.Dispose();
         }
     }
 

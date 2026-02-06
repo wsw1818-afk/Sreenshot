@@ -176,12 +176,22 @@ public class NotificationService
     {
         if (_toastWindow == null) return;
 
-        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(200));
-        fadeOut.Completed += (s, e) =>
+        try
         {
-            _toastWindow?.Close();
+            var window = _toastWindow;
+            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(200));
+            fadeOut.Completed += (s, e) =>
+            {
+                try { window.Close(); } catch { }
+                if (_toastWindow == window) _toastWindow = null;
+            };
+            window.BeginAnimation(Window.OpacityProperty, fadeOut);
+        }
+        catch
+        {
+            // 애니메이션 시작 실패 시 직접 닫기
+            try { _toastWindow?.Close(); } catch { }
             _toastWindow = null;
-        };
-        _toastWindow.BeginAnimation(Window.OpacityProperty, fadeOut);
+        }
     }
 }

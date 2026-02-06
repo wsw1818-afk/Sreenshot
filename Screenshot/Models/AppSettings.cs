@@ -54,11 +54,6 @@ public class AppSettings
     public bool AutoSave { get; set; } = true;
 
     /// <summary>
-    /// 캡처 후 편집 창 열기
-    /// </summary>
-    public bool OpenEditorAfterCapture { get; set; } = false;
-
-    /// <summary>
     /// 캡처 사운드 재생
     /// </summary>
     public bool PlaySound { get; set; } = true;

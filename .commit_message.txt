@@ -1,1 +1,1 @@
-🐛 Deactivate 먹통 개선: 2회 Deactivate 즉시 취소 + 안전 타이머 10초 단축 + 드래그 중 타이머 중지
+🐛 버그 수정: 설정↔동작 불일치(#49) + HideToast 예외방어(#50) + ScrollCapture 메모리누수(#55)
