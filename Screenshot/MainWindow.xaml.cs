@@ -1131,6 +1131,13 @@ public partial class MainWindow : Window
 
         CaptureLogger.Info("MainWindow", "리소스 정리 완료");
         CaptureLogger.FlushToFile();
+
+        // OnExplicitShutdown 모드이므로 반드시 Shutdown() 호출 필요
+        // (TrayMenu_Exit_Click 경로가 아닌 경우에도 프로세스 종료 보장)
+        if (!_isExiting)
+        {
+            System.Windows.Application.Current.Shutdown();
+        }
     }
 
     #endregion

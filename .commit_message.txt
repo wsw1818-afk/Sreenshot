@@ -1,1 +1,1 @@
-🐛 버그 수정: 설정↔동작 불일치(#49) + HideToast 예외방어(#50) + ScrollCapture 메모리누수(#55)
+🐛 앱 종료 안되는 버그 수정: OnExplicitShutdown 모드에서 X버튼 종료 시 Shutdown() 미호출 문제 해결
