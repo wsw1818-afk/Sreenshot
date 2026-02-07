@@ -77,7 +77,7 @@ public partial class MainWindow : Window
             _hotkeyService.DelayedCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureDelayedAsync); };
             _hotkeyService.WindowCapture += () => { if (!_isCapturing) SafeExecuteAsync(CaptureWindowAsync); };
 
-            if (_hotkeyService.RegisterHotkeys())
+            if (_hotkeyService.RegisterHotkeys(_settings))
             {
                 StatusText.Text = "준비됨 (단축키 활성화)";
             }
@@ -965,11 +965,11 @@ public partial class MainWindow : Window
             UpdateSavePathDisplay();
 
             // 단축키 설정 변경 시 재등록
-            if (_settings.EnableGlobalHotkeys && !_hotkeyService.IsRegistered)
+            if (_settings.EnableGlobalHotkeys)
             {
-                _hotkeyService.RegisterHotkeys();
+                _hotkeyService.RegisterHotkeys(_settings);
             }
-            else if (!_settings.EnableGlobalHotkeys && _hotkeyService.IsRegistered)
+            else if (_hotkeyService.IsRegistered)
             {
                 _hotkeyService.UnregisterHotkeys();
             }

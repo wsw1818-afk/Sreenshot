@@ -408,42 +408,68 @@ public partial class ImageEditorWindow : Window
         width = Math.Min(width, image.Width - x);
         height = Math.Min(height, image.Height - y);
 
+        if (width <= 0 || height <= 0) return;
+
         const int blockSize = 10;
 
-        for (int by = y; by < y + height; by += blockSize)
+        var bitmapData = image.LockBits(
+            new System.Drawing.Rectangle(0, 0, image.Width, image.Height),
+            ImageLockMode.ReadWrite,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+        try
         {
-            for (int bx = x; bx < x + width; bx += blockSize)
+            int stride = bitmapData.Stride;
+            unsafe
             {
-                int blockW = Math.Min(blockSize, x + width - bx);
-                int blockH = Math.Min(blockSize, y + height - by);
+                byte* scan0 = (byte*)bitmapData.Scan0;
 
-                // 블록 평균 색상 계산
-                int r = 0, g = 0, b = 0, count = 0;
-                for (int py = by; py < by + blockH && py < image.Height; py++)
+                for (int by = y; by < y + height; by += blockSize)
                 {
-                    for (int px = bx; px < bx + blockW && px < image.Width; px++)
+                    for (int bx = x; bx < x + width; bx += blockSize)
                     {
-                        var pixel = image.GetPixel(px, py);
-                        r += pixel.R;
-                        g += pixel.G;
-                        b += pixel.B;
-                        count++;
-                    }
-                }
+                        int blockW = Math.Min(blockSize, x + width - bx);
+                        int blockH = Math.Min(blockSize, y + height - by);
 
-                if (count == 0) continue;
+                        int rSum = 0, gSum = 0, bSum = 0, count = 0;
+                        for (int py = by; py < by + blockH && py < image.Height; py++)
+                        {
+                            byte* row = scan0 + py * stride;
+                            for (int px = bx; px < bx + blockW && px < image.Width; px++)
+                            {
+                                int offset = px * 4;
+                                bSum += row[offset];     // B
+                                gSum += row[offset + 1]; // G
+                                rSum += row[offset + 2]; // R
+                                count++;
+                            }
+                        }
 
-                var avgColor = System.Drawing.Color.FromArgb(r / count, g / count, b / count);
+                        if (count == 0) continue;
 
-                // 블록 채우기
-                for (int py = by; py < by + blockH && py < image.Height; py++)
-                {
-                    for (int px = bx; px < bx + blockW && px < image.Width; px++)
-                    {
-                        image.SetPixel(px, py, avgColor);
+                        byte avgB = (byte)(bSum / count);
+                        byte avgG = (byte)(gSum / count);
+                        byte avgR = (byte)(rSum / count);
+
+                        for (int py = by; py < by + blockH && py < image.Height; py++)
+                        {
+                            byte* row = scan0 + py * stride;
+                            for (int px = bx; px < bx + blockW && px < image.Width; px++)
+                            {
+                                int offset = px * 4;
+                                row[offset] = avgB;
+                                row[offset + 1] = avgG;
+                                row[offset + 2] = avgR;
+                                row[offset + 3] = 255;
+                            }
+                        }
                     }
                 }
             }
+        }
+        finally
+        {
+            image.UnlockBits(bitmapData);
         }
     }
 

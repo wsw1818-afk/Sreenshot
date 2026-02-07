@@ -3,8 +3,8 @@
 ## 개요
 - **프로젝트**: SmartCapture (스크린샷 캡처 도구)
 - **플랫폼**: Windows 10/11 (.NET 8.0)
-- **상태**: 버그 수정 완료 - 전체 코드 검증 완료
-- **마지막 업데이트**: 2026-02-06
+- **상태**: 코드 품질 개선 완료 + 성능 최적화
+- **마지막 업데이트**: 2026-02-07
 
 ---
 
@@ -37,6 +37,11 @@
 | #57(기존) | CaptureLogger.cs | `Buffer.ToString().Split('\n')` 제거 → `_lineCount` 카운터로 교체 (플러시 성능 개선) | 현재 |
 | #58(기존) | WindowCaptureService.cs | `TryBitBltCapture`에서 `SelectObject` 이중 호출 방지 (`hOld = IntPtr.Zero` 리셋) | 현재 |
 | #59(기존) | NotificationService.cs | `ShowToast()`에서 기존 토스트 닫기 시 예외 방어 (`try { Close(); } catch {}`) | 현재 |
+| #60(기존) | HotkeyService.cs, MainWindow.xaml.cs | `RegisterHotkeys(AppSettings?)` 오버로드 + `ResolveHotkey()` + `KeyNameToVk()` 추가, 사용자 설정 단축키 반영 | 현재 |
+| #61(기존) | CaptureLogger.cs, CaptureManager.cs | `CleanupOldLogs(retentionDays=7)` 메서드 추가, 앱 시작 시 자동 호출 | 현재 |
+| #66 | CaptureResult.cs | `IDisposable` 정식 구현: `_disposed` 플래그 + `GC.SuppressFinalize(this)` + 이중 Dispose 방지 | 현재 |
+| - | ImageEditorWindow.xaml.cs | `ApplyMosaic` 성능 최적화: `GetPixel/SetPixel` → `LockBits` unsafe 포인터 접근 (~10-100x 속도 향상) | 현재 |
+| - | ICaptureEngine.cs, CaptureManager.cs, DxgiCapture.cs | `IsBlackImage` 중복 코드 제거: `CaptureEngineBase.IsBlackImage` public static으로 통합 | 현재 |
 
 ### 허위/안전으로 확인된 버그 (#1~#40)
 
@@ -100,16 +105,16 @@
 | #63 | UrlInputDialog.xaml.cs | P3 낮음 | 잘못된 URL은 Chrome이 자체 에러 페이지 표시, 실질적 영향 극미 |
 | #64 | ScrollCaptureService.cs | 허위 | `unchecked` 블록이 이미 Line 234에 적용됨 |
 | #65 | DxgiCapture.cs | 안전 | 캡처 메서드 내에서 항상 `ReleaseFrame()` 호출, `Dispose()`는 COM 전체 해제 |
-| #66 | CaptureResult.cs | P3 설계 | `IDisposable` 인터페이스 미구현이나, 모든 호출처에서 명시적 `Dispose()` 호출 중 |
+| #66 | CaptureResult.cs | **수정됨** | `IDisposable` 정식 구현 완료: `_disposed` 플래그 + `GC.SuppressFinalize` |
 | #67 | MainWindow.xaml.cs | 안전 | `ToUpper()` 통일 후 비교, 미지원 포맷은 `_ => ImageFormat.Png` 기본값으로 안전 저장 |
 | #68 | ChromeCaptureService.cs | 안전 | `StitchImages`는 `captures.Count >= 2`일 때만 호출, 빈 목록 경로 없음 |
 
 ### 설계 개선 사항 (P2~P3)
 
-| # | 파일 | 우선순위 | 내용 |
-|---|------|---------|------|
-| #60(기존) | HotkeyService.cs | P2 설계 | `RegisterHotkeys()`가 하드코딩된 키만 등록, 사용자 설정 무시. 기본 단축키로 동작하므로 긴급하지 않음 |
-| #61(기존) | CaptureLogger.cs | P3 설계 | 앱 실행마다 새 로그 파일 생성, 오래된 로그 정리 메커니즘 없음 |
+| # | 파일 | 우선순위 | 내용 | 상태 |
+|---|------|---------|------|------|
+| #60(기존) | HotkeyService.cs | P2 설계 | `RegisterHotkeys(AppSettings?)` 오버로드로 사용자 설정 반영 | **완료** |
+| #61(기존) | CaptureLogger.cs | P3 설계 | `CleanupOldLogs(7)` 메서드 추가, 앱 시작 시 자동 정리 | **완료** |
 
 ---
 
@@ -117,16 +122,19 @@
 
 | 구분 | 건수 |
 |------|------|
-| **수정 완료** | 21건 (#1~#59 중 실제 버그) |
+| **수정 완료** | 27건 (#1~#68 중 실제 버그 + 설계 개선 + 성능 최적화) |
 | **허위 (버그 아님)** | 26건 |
 | **안전 (방어 코드 존재)** | 18건 |
-| **P3 설계/성능** | 7건 (미수정, 영향 극미) |
-| **총 검증** | 68건 + 4건(기존 수정 #57~#59) |
+| **P3 설계/성능** | 5건 (미수정, 영향 극미) |
+| **총 검증** | 68건 + 4건(기존 수정 #57~#59) + 2건(추가 개선) |
 
 ---
 
 ## 다음 할 일
-- [ ] (#60 기존) HotkeyService에서 사용자 설정 단축키 반영 (P2 설계 개선)
-- [ ] (#61 기존) 로그 파일 자동 정리 (7일 이상 된 로그 삭제, P3)
+- [x] (#60 기존) HotkeyService에서 사용자 설정 단축키 반영 → **완료**
+- [x] (#61 기존) 로그 파일 자동 정리 (7일 이상 된 로그 삭제) → **완료**
+- [x] (#66) CaptureResult에 IDisposable 정식 구현 → **완료**
+- [x] ImageEditorWindow 모자이크 LockBits 성능 최적화 → **완료**
+- [x] IsBlackImage 중복 코드 CaptureEngineBase로 통합 → **완료**
 - [ ] Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
 - [ ] 스크롤 캡처 (일반 + Chrome CDP) 실제 환경 테스트

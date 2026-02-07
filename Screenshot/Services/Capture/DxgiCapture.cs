@@ -346,30 +346,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         return bitmap;
     }
 
-    private bool IsBlackImage(Bitmap bitmap)
-    {
-        if (bitmap.Width <= 0 || bitmap.Height <= 0) return true;
-
-        int sampleCount = Math.Min(20, Math.Max(5, bitmap.Width * bitmap.Height / 100));
-        int blackCount = 0;
-        var random = new Random();
-
-        for (int i = 0; i < sampleCount; i++)
-        {
-            int x = random.Next(bitmap.Width);
-            int y = random.Next(bitmap.Height);
-
-            try
-            {
-                var pixel = bitmap.GetPixel(x, y);
-                if (pixel.R < 15 && pixel.G < 15 && pixel.B < 15)
-                    blackCount++;
-            }
-            catch { }
-        }
-
-        return (double)blackCount / sampleCount >= 0.85;
-    }
+    private static bool IsBlackImage(Bitmap bitmap) => CaptureEngineBase.IsBlackImage(bitmap);
 
     public void Dispose()
     {

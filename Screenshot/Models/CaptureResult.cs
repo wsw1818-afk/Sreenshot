@@ -5,8 +5,9 @@ namespace Screenshot.Models;
 /// <summary>
 /// 캡처 결과를 담는 모델
 /// </summary>
-public class CaptureResult
+public class CaptureResult : IDisposable
 {
+    private bool _disposed;
     /// <summary>
     /// 캡처 성공 여부
     /// </summary>
@@ -52,8 +53,11 @@ public class CaptureResult
     /// </summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         Image?.Dispose();
         Image = null;
+        GC.SuppressFinalize(this);
     }
 }
 

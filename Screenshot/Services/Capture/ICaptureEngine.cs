@@ -73,12 +73,9 @@ public abstract class CaptureEngineBase : ICaptureEngine
     private static readonly object RandomLock = new();
 
     /// <summary>
-    /// 이미지가 검은 화면인지 확인 (공통 구현)
+    /// 이미지가 검은 화면인지 확인 (공통 구현, static으로 외부에서도 호출 가능)
     /// </summary>
-    /// <param name="bitmap">확인할 비트맵</param>
-    /// <param name="threshold">검은색 RGB 임계값 (기본 15)</param>
-    /// <param name="blackRatio">검은 픽셀 비율 임계값 (기본 0.85)</param>
-    protected bool IsBlackImage(Bitmap bitmap, int threshold = 15, double blackRatio = 0.85)
+    public static bool IsBlackImage(Bitmap bitmap, int threshold = 15, double blackRatio = 0.85)
     {
         if (bitmap.Width <= 0 || bitmap.Height <= 0)
             return true;

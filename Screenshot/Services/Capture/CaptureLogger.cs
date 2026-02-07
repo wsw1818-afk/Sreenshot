@@ -286,6 +286,48 @@ public static class CaptureLogger
     }
 
     /// <summary>
+    /// 오래된 로그 파일 자동 정리 (기본 7일)
+    /// </summary>
+    public static void CleanupOldLogs(int retentionDays = 7)
+    {
+        try
+        {
+            var logDir = Path.GetDirectoryName(LogFilePath);
+            if (logDir == null || !Directory.Exists(logDir)) return;
+
+            var cutoff = DateTime.Now.AddDays(-retentionDays);
+            var logFiles = Directory.GetFiles(logDir, "capture_*.log");
+            int deletedCount = 0;
+
+            foreach (var file in logFiles)
+            {
+                if (string.Equals(file, LogFilePath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var fileInfo = new FileInfo(file);
+                if (fileInfo.LastWriteTime < cutoff)
+                {
+                    try
+                    {
+                        fileInfo.Delete();
+                        deletedCount++;
+                    }
+                    catch { }
+                }
+            }
+
+            if (deletedCount > 0)
+            {
+                Info("Cleanup", $"오래된 로그 {deletedCount}개 삭제 (보존: {retentionDays}일)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"로그 정리 실패: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// 로그 파일 경로 열기
     /// </summary>
     public static void OpenLogFolder()
