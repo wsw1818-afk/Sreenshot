@@ -219,9 +219,20 @@ public class WinRtCapture : ICaptureEngine, IDisposable
         }
     }
 
-    public CaptureResult CaptureMonitor(int monitorIndex) 
+    public CaptureResult CaptureMonitor(int monitorIndex)
     {
-        return CaptureFullScreen();
+        var monitors = DpiHelper.GetAllMonitors();
+        if (monitorIndex < 0 || monitorIndex >= monitors.Count)
+        {
+            return new CaptureResult
+            {
+                Success = false,
+                EngineName = Name,
+                ErrorMessage = $"잘못된 모니터 인덱스: {monitorIndex}"
+            };
+        }
+
+        return CaptureRegion(monitors[monitorIndex].Bounds);
     }
     
     public CaptureResult CaptureActiveWindow() 
