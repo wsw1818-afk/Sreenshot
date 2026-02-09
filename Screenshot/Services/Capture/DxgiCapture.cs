@@ -290,7 +290,9 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     }
 
     /// <summary>
-    /// 다중 모니터 환경에서 각 출력을 개별 캡처한 뒤 VirtualScreen 크기 비트맵에 합성
+    /// 다중 모니터 환경에서 각 출력을 개별 캡처한 뒤 VirtualScreen 크기 비트맵에 합성.
+    /// 각 모니터의 물리 텍스처를 논리 좌표에 맞춰 그리되, 물리 해상도가 다른 경우(DPI 스케일링)
+    /// 텍스처를 원본 크기 그대로 배치합니다.
     /// </summary>
     private CaptureResult CaptureVirtualScreen()
     {
@@ -301,7 +303,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         try
         {
             factory = new Factory1();
-            var capturedMonitors = new List<(Bitmap bmp, Rectangle bounds, double scaleX, double scaleY)>();
+            var capturedMonitors = new List<(Bitmap bmp, Rectangle bounds)>();
 
             // 모든 어댑터 → 모든 출력 열거
             for (int ai = 0; ai < factory.GetAdapterCount1(); ai++)
@@ -344,12 +346,9 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                                     using var texture = resource.QueryInterface<Texture2D>();
                                     var bmp = TextureToBitmapStatic(device, texture);
 
-                                    // DPI 스케일링 보정: 텍스처 물리 크기 ≠ DesktopBounds 논리 크기일 수 있음
-                                    double scaleX = (double)bmp.Width / bounds.Width;
-                                    double scaleY = (double)bmp.Height / bounds.Height;
-                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: Texture={bmp.Width}x{bmp.Height}, Scale={scaleX:F2}x{scaleY:F2}");
+                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: Texture={bmp.Width}x{bmp.Height}, LogicalBounds={bounds.Width}x{bounds.Height}");
 
-                                    capturedMonitors.Add((bmp, bounds, scaleX, scaleY));
+                                    capturedMonitors.Add((bmp, bounds));
                                 }
                                 finally
                                 {
@@ -394,20 +393,21 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             }
 
             // VirtualScreen(논리 좌표) 크기 비트맵에 합성
+            // 각 모니터 텍스처(물리 픽셀)를 논리 좌표 위치에 원본 크기로 배치
             var composite = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
-            composite.SetResolution(96f, 96f); // DPI 96으로 통일 (GDI+ 자동 스케일링 방지)
+            composite.SetResolution(96f, 96f);
             using (var g = Graphics.FromImage(composite))
             {
                 g.Clear(Color.Black);
-                foreach (var (bmp, bounds, scaleX, scaleY) in capturedMonitors)
+                foreach (var (bmp, bounds) in capturedMonitors)
                 {
-                    // 비트맵도 DPI 96으로 통일
                     bmp.SetResolution(96f, 96f);
                     // 모니터 좌표를 VirtualScreen 상대 좌표로 변환
                     int x = bounds.X - virtualScreen.X;
                     int y = bounds.Y - virtualScreen.Y;
-                    // bounds(논리 크기)에 비트맵을 맞춰 그리기
-                    g.DrawImage(bmp, x, y, bounds.Width, bounds.Height);
+                    // 물리 텍스처 원본 크기로 그리기 (확대/축소 없음)
+                    g.DrawImage(bmp, x, y, bmp.Width, bmp.Height);
+                    CaptureLogger.Info("DXGI", $"합성: pos=({x},{y}), drawSize={bmp.Width}x{bmp.Height}, logicalBounds={bounds.Width}x{bounds.Height}");
                     bmp.Dispose();
                 }
             }
