@@ -243,20 +243,38 @@ public class DxgiCapture : ICaptureEngine, IDisposable
 
     public CaptureResult CaptureRegion(Rectangle region)
     {
-        var result = CaptureFullScreen();
-        if (!result.Success || result.Image == null) return result;
+        // 가상 화면 전체가 필요한 경우 다중 모니터 합성 캡처 사용
+        var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
+        Bitmap? sourceImage = null;
+
+        if (region.Width >= virtualScreen.Width && region.Height >= virtualScreen.Height)
+        {
+            // VirtualScreen 전체 요청 → 다중 모니터 합성 캡처
+            var vsResult = CaptureVirtualScreen();
+            if (vsResult.Success && vsResult.Image != null)
+            {
+                sourceImage = vsResult.Image;
+            }
+        }
+
+        if (sourceImage == null)
+        {
+            // 단일 모니터 범위 또는 VirtualScreen 캡처 실패 → 주 모니터 캡처
+            var result = CaptureFullScreen();
+            if (!result.Success || result.Image == null) return result;
+            sourceImage = result.Image;
+        }
 
         try
         {
-            using var original = result.Image;
+            using var original = sourceImage;
 
-            // DXGI는 단일 출력(주 모니터)만 캡처하므로,
-            // 요청 영역이 캡처 이미지 범위를 벗어나면 실패 반환 (GDI fallback 유도)
+            // 요청 영역이 캡처 이미지 범위를 벗어나면 실패
             if (region.X + region.Width > original.Width || region.Y + region.Height > original.Height
                 || region.X < 0 || region.Y < 0)
             {
                 CaptureLogger.Warn("DXGI", $"CaptureRegion 범위 초과: region={region}, image={original.Width}x{original.Height}");
-                return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역이 단일 출력 범위 초과" };
+                return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역 범위 초과" };
             }
 
             var cropped = new Bitmap(region.Width, region.Height);
@@ -269,6 +287,188 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         {
             return new CaptureResult { Success = false, ErrorMessage = ex.Message };
         }
+    }
+
+    /// <summary>
+    /// 다중 모니터 환경에서 각 출력을 개별 캡처한 뒤 VirtualScreen 크기 비트맵에 합성
+    /// </summary>
+    private CaptureResult CaptureVirtualScreen()
+    {
+        CaptureLogger.Info("DXGI", "다중 모니터 합성 캡처 시작");
+        var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
+
+        Factory1? factory = null;
+        try
+        {
+            factory = new Factory1();
+            var capturedMonitors = new List<(Bitmap bmp, Rectangle bounds)>();
+
+            // 모든 어댑터 → 모든 출력 열거
+            for (int ai = 0; ai < factory.GetAdapterCount1(); ai++)
+            {
+                Adapter1? adapter = null;
+                try
+                {
+                    adapter = factory.GetAdapter1(ai);
+                    for (int oi = 0; ; oi++)
+                    {
+                        Output? output = null;
+                        Output1? output1 = null;
+                        SharpDX.Direct3D11.Device? device = null;
+                        OutputDuplication? duplication = null;
+
+                        try
+                        {
+                            output = adapter.GetOutput(oi);
+                            var outputDesc = output.Description;
+                            var bounds = new Rectangle(
+                                outputDesc.DesktopBounds.Left,
+                                outputDesc.DesktopBounds.Top,
+                                outputDesc.DesktopBounds.Right - outputDesc.DesktopBounds.Left,
+                                outputDesc.DesktopBounds.Bottom - outputDesc.DesktopBounds.Top);
+
+                            CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] {outputDesc.DeviceName} - {bounds}");
+
+                            device = new SharpDX.Direct3D11.Device(adapter);
+                            output1 = output.QueryInterface<Output1>();
+                            duplication = output1.DuplicateOutput(device);
+
+                            try { duplication.ReleaseFrame(); } catch { }
+                            Thread.Sleep(100);
+
+                            var frameResult = duplication.TryAcquireNextFrame(2000, out _, out var resource);
+                            if (frameResult.Success)
+                            {
+                                try
+                                {
+                                    using var texture = resource.QueryInterface<Texture2D>();
+                                    var bmp = TextureToBitmapStatic(device, texture);
+                                    capturedMonitors.Add((bmp, bounds));
+                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: {bmp.Width}x{bmp.Height}");
+                                }
+                                finally
+                                {
+                                    duplication.ReleaseFrame();
+                                }
+                            }
+                            else
+                            {
+                                CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 프레임 획득 실패");
+                            }
+                        }
+                        catch (SharpDXException ex) when (ex.ResultCode == SharpDX.DXGI.ResultCode.NotFound)
+                        {
+                            break; // 더 이상 출력 없음
+                        }
+                        catch (Exception ex)
+                        {
+                            CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 캡처 실패: {ex.Message}");
+                        }
+                        finally
+                        {
+                            duplication?.Dispose();
+                            output1?.Dispose();
+                            device?.Dispose();
+                            output?.Dispose();
+                        }
+                    }
+                }
+                catch (SharpDXException ex) when (ex.ResultCode == SharpDX.DXGI.ResultCode.NotFound)
+                {
+                    break; // 더 이상 어댑터 없음
+                }
+                finally
+                {
+                    adapter?.Dispose();
+                }
+            }
+
+            if (capturedMonitors.Count == 0)
+            {
+                return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 다중 모니터 캡처: 캡처된 출력 없음" };
+            }
+
+            // VirtualScreen 크기 비트맵에 합성
+            var composite = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(composite))
+            {
+                g.Clear(Color.Black);
+                foreach (var (bmp, bounds) in capturedMonitors)
+                {
+                    // 모니터 좌표를 VirtualScreen 상대 좌표로 변환
+                    int x = bounds.X - virtualScreen.X;
+                    int y = bounds.Y - virtualScreen.Y;
+                    g.DrawImage(bmp, x, y, bounds.Width, bounds.Height);
+                    bmp.Dispose();
+                }
+            }
+
+            CaptureLogger.Info("DXGI", $"다중 모니터 합성 완료: {composite.Width}x{composite.Height}, 모니터 {capturedMonitors.Count}개");
+            return new CaptureResult { Success = true, Image = composite, EngineName = Name };
+        }
+        catch (Exception ex)
+        {
+            CaptureLogger.Error("DXGI", "다중 모니터 합성 캡처 실패", ex);
+            return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = $"DXGI VirtualScreen 실패: {ex.Message}" };
+        }
+        finally
+        {
+            factory?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 지정된 디바이스와 텍스처로 비트맵 변환 (static 용도, 다중 모니터 캡처에서 사용)
+    /// </summary>
+    private static Bitmap TextureToBitmapStatic(SharpDX.Direct3D11.Device device, Texture2D texture)
+    {
+        var desc = texture.Description;
+        var width = desc.Width;
+        var height = desc.Height;
+
+        var stagingDesc = new Texture2DDescription
+        {
+            Width = width,
+            Height = height,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = desc.Format,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Staging,
+            BindFlags = BindFlags.None,
+            CpuAccessFlags = CpuAccessFlags.Read,
+            OptionFlags = ResourceOptionFlags.None
+        };
+
+        using var stagingTexture = new Texture2D(device, stagingDesc);
+        device.ImmediateContext.CopyResource(texture, stagingTexture);
+
+        var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        var dataBox = device.ImmediateContext.MapSubresource(stagingTexture, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
+        var bitmapData = bitmap.LockBits(
+            new Rectangle(0, 0, width, height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppArgb);
+
+        try
+        {
+            unsafe
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var srcPtr = (byte*)dataBox.DataPointer + y * dataBox.RowPitch;
+                    var destPtr = (byte*)bitmapData.Scan0 + y * bitmapData.Stride;
+                    Utilities.CopyMemory((IntPtr)destPtr, (IntPtr)srcPtr, Math.Min(dataBox.RowPitch, bitmapData.Stride));
+                }
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+            device.ImmediateContext.UnmapSubresource(stagingTexture, 0);
+        }
+
+        return bitmap;
     }
 
     private void Initialize()
