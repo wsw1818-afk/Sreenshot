@@ -170,7 +170,7 @@ public class CaptureOverlayForm : Form
                         try
                         {
                             if (IsDisposed || _closingByUser) return;
-                            SetForegroundWindow(Handle);
+                            ForceSetForeground();
                             Activate();
                         }
                         catch (ObjectDisposedException) { }
