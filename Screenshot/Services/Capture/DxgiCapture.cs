@@ -309,6 +309,9 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         CaptureLogger.Info("DXGI", "다중 모니터 합성 캡처 시작");
         var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
 
+        // 기존 인스턴스의 DuplicateOutput 세션 정리 (같은 출력에 중복 DuplicateOutput 방지)
+        Dispose();
+
         Factory1? factory = null;
         try
         {
