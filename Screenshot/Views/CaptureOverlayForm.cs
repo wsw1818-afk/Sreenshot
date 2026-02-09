@@ -215,18 +215,21 @@ public class CaptureOverlayForm : Form
                 e.Cancel = true;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 (e.Cancel = true)");
 
-                // 닫기 차단 후 키보드 포커스 재설정
-                BeginInvoke(() =>
+                // 닫기 차단 후 키보드 포커스 재설정 (핸들 생성 전이면 무시)
+                if (IsHandleCreated)
                 {
-                    try
+                    BeginInvoke(() =>
                     {
-                        if (IsDisposed || _closingByUser) return;
-                        SetForegroundWindow(Handle);
-                        Activate();
-                        Focus();
-                    }
-                    catch (ObjectDisposedException) { }
-                });
+                        try
+                        {
+                            if (IsDisposed || _closingByUser) return;
+                            SetForegroundWindow(Handle);
+                            Activate();
+                            Focus();
+                        }
+                        catch (ObjectDisposedException) { }
+                    });
+                }
             }
         };
 
