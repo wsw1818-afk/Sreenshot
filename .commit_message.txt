@@ -1,1 +1,1 @@
-🐛 버그 수정: 모니터 2 캡처 시 모니터 1이 캡처되는 문제 - DxgiCapture/WinRtCapture의 CaptureMonitor가 monitorIndex를 무시하던 버그 수정
+🐛 버그 수정: 다중 모니터 영역 캡처 시 확대 문제 - DXGI가 주 모니터만 캡처하여 VirtualScreen에 늘려 표시되던 버그 → GDI VirtualScreen 전체 캡처로 수정

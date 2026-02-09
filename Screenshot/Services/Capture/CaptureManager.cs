@@ -64,12 +64,16 @@ public class CaptureManager : IDisposable
     }
 
     /// <summary>
-    /// 이벤트 없이 전체 화면 캡처 (영역 선택용)
+    /// 이벤트 없이 전체 가상 화면 캡처 (영역 선택용)
+    /// 다중 모니터 환경에서 VirtualScreen 전체를 캡처합니다.
+    /// DXGI는 단일 출력만 지원하므로, GDI BitBlt(VirtualScreen)을 우선 사용합니다.
     /// </summary>
     public async Task<CaptureResult> CaptureFullScreenRawAsync()
     {
-        CaptureLogger.Info("Capture", "=== 전체 화면 캡처 (Raw, 이벤트 없음) ===");
-        return await Task.Run(() => ExecuteCaptureRaw(e => e.CaptureFullScreen(), "FullScreen"));
+        CaptureLogger.Info("Capture", "=== 전체 가상 화면 캡처 (Raw, 영역선택용) ===");
+        var virtualBounds = System.Windows.Forms.SystemInformation.VirtualScreen;
+        CaptureLogger.Info("Capture", $"VirtualScreen: {virtualBounds}");
+        return await Task.Run(() => ExecuteCaptureRaw(e => e.CaptureRegion(virtualBounds), "VirtualScreen"));
     }
 
     public async Task<CaptureResult> CaptureMonitorAsync(int monitorIndex)

@@ -249,10 +249,20 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         try
         {
             using var original = result.Image;
+
+            // DXGI는 단일 출력(주 모니터)만 캡처하므로,
+            // 요청 영역이 캡처 이미지 범위를 벗어나면 실패 반환 (GDI fallback 유도)
+            if (region.X + region.Width > original.Width || region.Y + region.Height > original.Height
+                || region.X < 0 || region.Y < 0)
+            {
+                CaptureLogger.Warn("DXGI", $"CaptureRegion 범위 초과: region={region}, image={original.Width}x{original.Height}");
+                return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역이 단일 출력 범위 초과" };
+            }
+
             var cropped = new Bitmap(region.Width, region.Height);
             using (var g = Graphics.FromImage(cropped))
                 g.DrawImage(original, new Rectangle(0, 0, region.Width, region.Height), region, GraphicsUnit.Pixel);
-            
+
             return new CaptureResult { Success = true, Image = cropped, EngineName = Name };
         }
         catch (Exception ex)
