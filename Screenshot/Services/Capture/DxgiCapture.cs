@@ -301,7 +301,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         try
         {
             factory = new Factory1();
-            var capturedMonitors = new List<(Bitmap bmp, Rectangle bounds)>();
+            var capturedMonitors = new List<(Bitmap bmp, Rectangle bounds, double scaleX, double scaleY)>();
 
             // 모든 어댑터 → 모든 출력 열거
             for (int ai = 0; ai < factory.GetAdapterCount1(); ai++)
@@ -327,7 +327,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                                 outputDesc.DesktopBounds.Right - outputDesc.DesktopBounds.Left,
                                 outputDesc.DesktopBounds.Bottom - outputDesc.DesktopBounds.Top);
 
-                            CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] {outputDesc.DeviceName} - {bounds}");
+                            CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] {outputDesc.DeviceName} - Bounds={bounds}");
 
                             device = new SharpDX.Direct3D11.Device(adapter);
                             output1 = output.QueryInterface<Output1>();
@@ -343,8 +343,13 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                                 {
                                     using var texture = resource.QueryInterface<Texture2D>();
                                     var bmp = TextureToBitmapStatic(device, texture);
-                                    capturedMonitors.Add((bmp, bounds));
-                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: {bmp.Width}x{bmp.Height}");
+
+                                    // DPI 스케일링 보정: 텍스처 물리 크기 ≠ DesktopBounds 논리 크기일 수 있음
+                                    double scaleX = (double)bmp.Width / bounds.Width;
+                                    double scaleY = (double)bmp.Height / bounds.Height;
+                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: Texture={bmp.Width}x{bmp.Height}, Scale={scaleX:F2}x{scaleY:F2}");
+
+                                    capturedMonitors.Add((bmp, bounds, scaleX, scaleY));
                                 }
                                 finally
                                 {
@@ -388,16 +393,20 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                 return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 다중 모니터 캡처: 캡처된 출력 없음" };
             }
 
-            // VirtualScreen 크기 비트맵에 합성
+            // VirtualScreen(논리 좌표) 크기 비트맵에 합성
             var composite = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
+            composite.SetResolution(96f, 96f); // DPI 96으로 통일 (GDI+ 자동 스케일링 방지)
             using (var g = Graphics.FromImage(composite))
             {
                 g.Clear(Color.Black);
-                foreach (var (bmp, bounds) in capturedMonitors)
+                foreach (var (bmp, bounds, scaleX, scaleY) in capturedMonitors)
                 {
+                    // 비트맵도 DPI 96으로 통일
+                    bmp.SetResolution(96f, 96f);
                     // 모니터 좌표를 VirtualScreen 상대 좌표로 변환
                     int x = bounds.X - virtualScreen.X;
                     int y = bounds.Y - virtualScreen.Y;
+                    // bounds(논리 크기)에 비트맵을 맞춰 그리기
                     g.DrawImage(bmp, x, y, bounds.Width, bounds.Height);
                     bmp.Dispose();
                 }

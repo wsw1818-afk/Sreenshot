@@ -108,6 +108,9 @@ public class CaptureOverlayForm : Form
             using var ms = new MemoryStream(bytes);
             _displayBitmap = new Bitmap(ms);
 
+            // DPI를 96으로 강제 설정 (GDI+ 자동 DPI 보정에 의한 확대/축소 방지)
+            _displayBitmap.SetResolution(96f, 96f);
+
             Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
                 $"임시파일 로드 성공: {_tempFilePath}, DisplayBmp={_displayBitmap.Width}x{_displayBitmap.Height}");
         }
