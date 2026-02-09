@@ -22,6 +22,18 @@ public class CaptureOverlayForm : Form
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
     // Low-level 키보드 훅 (포커스 상실 시에도 ESC 감지)
     [DllImport("user32.dll")]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hInstance, uint threadId);
@@ -181,9 +193,8 @@ public class CaptureOverlayForm : Form
                     return;
                 }
 
-                // 복구 시도
-                SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
-                SetForegroundWindow(Handle);
+                // 강력한 포커스 복구: AttachThreadInput으로 전경 창 권한 획득
+                ForceSetForeground();
 
                 BeginInvoke(() =>
                 {
@@ -223,7 +234,7 @@ public class CaptureOverlayForm : Form
                         try
                         {
                             if (IsDisposed || _closingByUser) return;
-                            SetForegroundWindow(Handle);
+                            ForceSetForeground();
                             Activate();
                             Focus();
                         }
@@ -568,5 +579,38 @@ public class CaptureOverlayForm : Form
             _helpSubFont.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// AttachThreadInput을 사용한 강력한 전경 창 전환.
+    /// Windows의 전경 창 잠금 정책을 우회하여 확실히 포커스를 가져옵니다.
+    /// </summary>
+    private void ForceSetForeground()
+    {
+        try
+        {
+            var foregroundHwnd = GetForegroundWindow();
+            if (foregroundHwnd == Handle) return; // 이미 전경
+
+            var foregroundThread = GetWindowThreadProcessId(foregroundHwnd, out _);
+            var currentThread = GetCurrentThreadId();
+
+            // 전경 창의 스레드에 입력을 연결하여 SetForegroundWindow 권한 획득
+            if (foregroundThread != currentThread)
+                AttachThreadInput(currentThread, foregroundThread, true);
+
+            SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+            SetForegroundWindow(Handle);
+
+            if (foregroundThread != currentThread)
+                AttachThreadInput(currentThread, foregroundThread, false);
+        }
+        catch (Exception ex)
+        {
+            Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", $"ForceSetForeground 실패: {ex.Message}");
+            // 폴백: 기본 방식
+            SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+            SetForegroundWindow(Handle);
+        }
     }
 }
