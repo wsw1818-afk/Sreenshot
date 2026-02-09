@@ -86,12 +86,12 @@ public class ChromeCaptureService
     /// <summary>
     /// 스크롤 가능한 전체 페이지 캡처 (레이아웃 메트릭스 사용)
     /// </summary>
-    public async Task<Bitmap?> CaptureFullScrollablePageAsync(int debugPort = DefaultDebugPort)
+    public async Task<Bitmap?> CaptureFullScrollablePageAsync(int debugPort = DefaultDebugPort, string? targetUrl = null)
     {
         try
         {
             StatusChanged?.Invoke("Chrome 연결 중...");
-            var wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort);
+            var wsUrl = await GetWebSocketDebuggerUrlAsync(debugPort, targetUrl);
 
             if (string.IsNullOrEmpty(wsUrl))
             {
@@ -123,7 +123,7 @@ public class ChromeCaptureService
             if (fullHeight > 8000)
             {
                 StatusChanged?.Invoke("긴 페이지 감지 - 스크롤 캡처로 전환...");
-                return await CaptureWithKeyboardScrollAsync(debugPort);
+                return await CaptureWithKeyboardScrollAsync(debugPort, url: targetUrl);
             }
 
             StatusChanged?.Invoke($"전체 페이지 캡처 중... ({fullWidth}x{fullHeight})");
@@ -200,7 +200,11 @@ public class ChromeCaptureService
             {
                 if (!string.IsNullOrEmpty(targetUrl))
                 {
-                    var targetUrlBase = targetUrl.Split('?')[0].Split('#')[0];
+                    // URL 정규화: scheme+host+path 기준으로 정확 비교 (query/fragment 무시)
+                    var targetUri = Uri.TryCreate(targetUrl, UriKind.Absolute, out var tUri)
+                        ? tUri.GetLeftPart(UriPartial.Path).TrimEnd('/')
+                        : targetUrl.Split('?')[0].Split('#')[0].TrimEnd('/');
+
                     foreach (var tab in tabs)
                     {
                         if (tab.TryGetProperty("type", out var type) &&
@@ -208,11 +212,17 @@ public class ChromeCaptureService
                             tab.TryGetProperty("url", out var tabUrl))
                         {
                             var tabUrlString = tabUrl.GetString();
-                            if (!string.IsNullOrEmpty(tabUrlString) &&
-                                tabUrlString.Contains(targetUrlBase) &&
-                                tab.TryGetProperty("webSocketDebuggerUrl", out var wsUrl))
+                            if (!string.IsNullOrEmpty(tabUrlString))
                             {
-                                return wsUrl.GetString();
+                                var tabUri = Uri.TryCreate(tabUrlString, UriKind.Absolute, out var tuUri)
+                                    ? tuUri.GetLeftPart(UriPartial.Path).TrimEnd('/')
+                                    : tabUrlString.Split('?')[0].Split('#')[0].TrimEnd('/');
+
+                                if (string.Equals(tabUri, targetUri, StringComparison.OrdinalIgnoreCase) &&
+                                    tab.TryGetProperty("webSocketDebuggerUrl", out var wsUrl))
+                                {
+                                    return wsUrl.GetString();
+                                }
                             }
                         }
                     }
@@ -420,7 +430,7 @@ public class ChromeCaptureService
             }
 
             // 일반 페이지는 전체 페이지 캡처
-            return await CaptureFullScrollablePageAsync(debugPort);
+            return await CaptureFullScrollablePageAsync(debugPort, targetUrl: url);
         }
         catch (Exception ex)
         {

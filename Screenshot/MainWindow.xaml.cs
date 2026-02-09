@@ -452,14 +452,24 @@ public partial class MainWindow : Window
                 // CaptureManager.ProcessCaptureResult()에서 이미 저장된 경우 중복 저장 방지
                 if (string.IsNullOrEmpty(result.SavedFilePath) && _settings.AutoSave)
                 {
-                    var fileName = $"capture_{DateTime.Now:yyyyMMdd_HHmmss}.{_settings.ImageFormat.ToLower()}";
-                    var filePath = Path.Combine(_settings.SaveFolder, fileName);
+                    // .NET System.Drawing은 webp 미지원 → PNG로 대체 저장
+                    var actualFmt = _settings.ImageFormat.ToLower();
+                    if (actualFmt == "webp") actualFmt = "png";
+                    var baseName = $"capture_{DateTime.Now:yyyyMMdd_HHmmss}";
+                    var ext = $".{actualFmt}";
+                    var filePath = Path.Combine(_settings.SaveFolder, baseName + ext);
+                    int counter = 1;
+                    while (File.Exists(filePath))
+                    {
+                        filePath = Path.Combine(_settings.SaveFolder, $"{baseName}_{counter}{ext}");
+                        counter++;
+                    }
                     Services.Capture.CaptureLogger.Info("MainWindow", $"[HandleCaptureResult] 저장 시도: {filePath}");
 
                     try
                     {
                         Directory.CreateDirectory(_settings.SaveFolder);
-                        var format = _settings.ImageFormat.ToUpper() switch
+                        var format = actualFmt.ToUpper() switch
                         {
                             "PNG" => ImageFormat.Png,
                             "JPEG" or "JPG" => ImageFormat.Jpeg,

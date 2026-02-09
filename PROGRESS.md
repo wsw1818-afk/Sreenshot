@@ -4,7 +4,7 @@
 - **프로젝트**: SmartCapture (스크린샷 캡처 도구)
 - **플랫폼**: Windows 10/11 (.NET 8.0)
 - **상태**: 코드 품질 개선 완료 + 성능 최적화
-- **마지막 업데이트**: 2026-02-07
+- **마지막 업데이트**: 2026-02-09
 
 ---
 
@@ -122,7 +122,7 @@
 
 | 구분 | 건수 |
 |------|------|
-| **수정 완료** | 27건 (#1~#68 중 실제 버그 + 설계 개선 + 성능 최적화) |
+| **수정 완료** | 34건 (#1~#75 중 실제 버그 + 설계 개선 + 성능 최적화) |
 | **허위 (버그 아님)** | 26건 |
 | **안전 (방어 코드 존재)** | 18건 |
 | **P3 설계/성능** | 5건 (미수정, 영향 극미) |
@@ -138,3 +138,146 @@
 - [x] IsBlackImage 중복 코드 CaptureEngineBase로 통합 → **완료**
 - [ ] Deactivate 포커스 복구 수정 후 실제 환경 테스트 (3회 연속 영역 캡처)
 - [ ] 스크롤 캡처 (일반 + Chrome CDP) 실제 환경 테스트
+
+---
+
+## 추가 코드리뷰 (2026-02-09, 인수인계용 상세)
+
+### 분석 범위
+- `Screenshot/MainWindow.xaml.cs`
+- `Screenshot/Services/Capture/*.cs` (CaptureManager, DxgiCapture, GdiCapture, WinRtCapture, CaptureLogger)
+- `Screenshot/Services/*.cs` (HotkeyService, ChromeCaptureService, ScrollCaptureService, NotificationService)
+- `Screenshot/Views/SettingsWindow.xaml.cs`
+
+### 실행/검증 결과
+- `dotnet build Screenshot.sln -v minimal` 성공 (경고 0, 오류 0)
+- `dotnet list Screenshot/Screenshot.csproj package --vulnerable` 취약 패키지 없음
+- `dotnet list Screenshot/Screenshot.csproj package --outdated` 업데이트 가능 패키지 확인
+  - `Hardcodet.NotifyIcon.Wpf` `1.1.0 -> 2.0.1`
+  - `Microsoft.Windows.CsWinRT` `2.0.8 -> 2.2.0`
+  - `System.Text.Json` `8.0.5 -> 10.0.2`
+
+### 신규 확정 이슈 (#69~#75)
+
+| # | 우선순위 | 파일 | 핵심 문제 | 상태 |
+|---|---|---|---|---|
+| #69 | P1 | `Screenshot/Services/Capture/CaptureManager.cs` | Window Capture 경로가 실제로는 Full Screen Capture를 먼저 반환함 | **수정됨** - WindowCaptureService(PrintWindow) 우선 사용 |
+| #70 | P1 | `Screenshot/Services/HotkeyService.cs` | 단축키 일부만 등록되어도 실패로 표시되고, 이미 등록된 일부 단축키는 남아 상태 불일치 발생 | **수정됨** - all-or-nothing 롤백 패턴 |
+| #71 | P2 | `Screenshot/Services/HotkeyService.cs` | UI에서 입력 가능한 키와 실제 등록 가능한 키 매핑 불일치(설정 무시/기본값 fallback) | **수정됨** - NumPad/OEM/방향키/특수키 전체 매핑 |
+| #72 | P2 | `Screenshot/Services/Capture/DxgiCapture.cs` | 다중 모니터(음수 VirtualScreen 좌표)에서 DXGI 영역 캡처 좌표계 불일치 | **수정됨** - VirtualScreen 기준 좌표 정규화 |
+| #73 | P2 | `Screenshot/MainWindow.xaml.cs` | AutoSave 파일명 충돌 처리 누락(초 단위 파일명)으로 덮어쓰기 가능 | **수정됨** - while(File.Exists) 카운터 추가 |
+| #74 | P2 | `Screenshot/Services/ChromeCaptureService.cs` | URL 지정 캡처 시 탭 선택 로직이 느슨해 다른 탭 캡처 가능성 | **수정됨** - Uri 기반 정확 매칭 + targetUrl 전달 |
+| #75 | P3 | `Screenshot/Services/Capture/CaptureManager.cs`, `Screenshot/MainWindow.xaml.cs` | 설정값 `webp`일 때 확장자는 `.webp`인데 실제 저장 포맷은 PNG | **수정됨** - webp→PNG 대체 + 확장자 일치 |
+
+### #69 Window Capture가 Full Screen으로 동작하는 문제
+- 근거 코드
+- `Screenshot/Services/Capture/CaptureManager.cs:107` `ExecuteCapture(e => e.CaptureActiveWindow(), "Window")`
+- `Screenshot/Services/Capture/DxgiCapture.cs:239` `CaptureActiveWindow() => CaptureFullScreen()`
+- `Screenshot/Services/Capture/GdiCapture.cs:218` `CaptureActiveWindow() => CaptureFullScreen()`
+- 영향
+- "창 캡처" 버튼이 사용자 기대(전경 창 영역)와 다르게 전체 화면을 저장할 수 있음
+- `WindowCaptureService` fallback 로직이 성공 경로에서 실행되지 않을 수 있음
+- 재현
+1. 앱 실행 후 작은 창 하나만 전경으로 둠
+2. "창 캡처" 실행
+3. 결과 이미지가 창만이 아니라 전체 화면인지 확인
+- 수정 가이드
+1. `CaptureManager.CaptureWindowAsync`에서 `ExecuteCapture` 경로를 제거하거나, 실제 `hWnd` 기반 캡처 인터페이스를 추가
+2. `ICaptureEngine`에 `CaptureWindow(IntPtr hWnd)`를 도입하거나 `WindowCaptureService`를 우선 경로로 사용
+3. 성공 기준에서 캡처 영역이 전경 창 bounds와 일치하는지 검증 로직 추가
+
+### #70 단축키 부분 등록 상태 불일치
+- 근거 코드
+- `Screenshot/Services/HotkeyService.cs:71-96` 일부 등록 성공 후 `registeredKeys.Count == 4`가 아니면 `false` 반환
+- 예외 케이스에서만 rollback 수행(`catch` 블록)
+- 영향
+- UI/상태는 "등록 실패"인데 특정 단축키는 실제로 동작
+- 재설정/해제 시 사용자 혼란 및 디버깅 난이도 상승
+- 재현
+1. 하나의 단축키를 OS/다른 앱과 충돌 나도록 설정
+2. 등록 결과가 실패로 표시되는지 확인
+3. 충돌 없는 나머지 단축키가 여전히 동작하는지 확인
+- 수정 가이드
+1. `registeredKeys.Count != 4`이면 즉시 rollback(`UnregisterHotKey` all registered)
+2. 실패 원인(어떤 ID 등록 실패인지) 로그/UI 노출
+3. 등록 API를 "all-or-nothing"으로 고정
+
+### #71 설정 UI-엔진 키매핑 불일치
+- 근거 코드
+- `Screenshot/Views/SettingsWindow.xaml.cs:326-337` Numpad/OEM 키 문자열 생성
+- `Screenshot/Services/HotkeyService.cs:131-156` `KeyNameToVk`는 A-Z/F1-F12/0-9/PrintScreen만 지원
+- 영향
+- 사용자 입력 단축키가 저장되지만 재등록 시 silently fallback(기본값 사용)
+- "설정 저장했는데 반영 안 됨" 형태의 장애로 보임
+- 수정 가이드
+1. `KeyNameToVk`에 `NumPad0~9`, `Oem*`, 방향키 등 UI 허용 키 전부 매핑
+2. 매핑 실패 시 fallback 대신 저장 차단 + 경고 메시지 제공
+3. 저장 시점에 hotkey validation 수행
+
+### #72 DXGI 다중 모니터 음수 좌표 처리 오류
+- 근거 코드
+- `Screenshot/Services/Capture/DxgiCapture.cs:247-253` VirtualScreen 전체 요청 시 합성 비트맵 생성
+- `Screenshot/Services/Capture/DxgiCapture.cs:273-274` `region.X < 0 || region.Y < 0`이면 실패 처리
+- 영향
+- 왼쪽/위쪽 보조 모니터가 있는 환경(virtual origin 음수)에서 DXGI raw 영역 캡처 실패
+- 결과적으로 GDI fallback 비중 증가(성능/품질 저하)
+- 재현
+1. 보조 모니터를 주 모니터 왼쪽에 배치(virtual X < 0)
+2. 영역 캡처 진입(내부적으로 `CaptureFullScreenRawAsync` 사용)
+3. 로그에서 DXGI region out-of-range 확인 후 GDI fallback 여부 확인
+- 수정 가이드
+1. `CaptureVirtualScreen` 결과를 사용할 때 `region`을 virtual origin 기준으로 normalize
+2. 예: `normalizedX = region.X - virtualScreen.X`, `normalizedY = region.Y - virtualScreen.Y`
+3. bounds check를 normalized 좌표 기준으로 변경
+
+### #73 AutoSave 파일 덮어쓰기 가능
+- 근거 코드
+- `Screenshot/MainWindow.xaml.cs:453-470` 파일명 `capture_yyyyMMdd_HHmmss` 생성 후 `Save` 수행
+- 동일 파일 존재 여부/카운터 증가 로직 없음
+- 영향
+- 같은 초에 연속 캡처 시 이전 파일이 덮어써질 수 있음
+- 특히 `CaptureRegionAsync`, `CaptureScrollAsync`, `CaptureWithChromeCdpAsync` 경로는 MainWindow에서 직접 저장
+- 수정 가이드
+1. `CaptureManager.SaveToFile`와 동일하게 collision-safe naming 적용
+2. 최소 `while (File.Exists(path))` + suffix 증가 로직 추가
+3. 저장 경로 생성을 공용 유틸로 통합하여 중복 제거
+
+### #74 URL 캡처 탭 선택 오탐 가능성 (코드 추론 기반)
+- 근거 코드
+- `Screenshot/Services/ChromeCaptureService.cs:192` `GetWebSocketDebuggerUrlAsync(int, string? targetUrl = null)`
+- `Screenshot/Services/ChromeCaptureService.cs:212` `tabUrlString.Contains(targetUrlBase)`로 느슨한 매칭
+- `Screenshot/Services/ChromeCaptureService.cs:423` `CaptureFullScrollablePageAsync(debugPort)` 호출 시 targetUrl 미전달
+- 영향
+- 다중 탭 환경에서 의도한 URL이 아닌 탭을 캡처할 수 있음
+- 수정 가이드
+1. URL 매칭을 `Uri` 기반 host/path strict match로 변경
+2. `CaptureUrlAsync` 이후 후속 호출에도 targetUrl을 끝까지 전달
+3. 선택된 탭의 URL을 상태 로그에 출력해 검증 가능성 강화
+
+### #75 `webp` 확장자/실제 포맷 불일치
+- 근거 코드
+- `Screenshot/Services/Capture/CaptureManager.cs:379-383` 확장자 `.webp` 허용
+- `Screenshot/Services/Capture/CaptureManager.cs:397-401` 저장 포맷은 PNG/JPEG/BMP만 지원, 나머지는 PNG
+- 영향
+- `.webp` 파일 확장자지만 실제 파일 헤더는 PNG일 수 있음
+- 수정 가이드
+1. 실제 WebP 인코더 도입 전까지 `webp` 옵션 제거/차단
+2. `AppSettings.Load()` 시 unsupported format sanitize
+3. 저장 후 magic number 검사(선택)
+
+### 후속 작업 우선순위 제안 (다른 AI 작업 순서)
+1. #69 수정 (기능 정합성 핵심)
+2. #70 + #71 묶음 수정 (단축키 안정화)
+3. #73 수정 (데이터 유실 방지)
+4. #72 수정 (다중 모니터 안정성)
+5. #74, #75 수정 (정확도/설정 일관성)
+
+### 다음 세션 체크리스트 (인수인계용)
+- [x] #69 수정 완료 - WindowCaptureService(PrintWindow) 우선 사용, 실패 시 엔진 fallback
+- [x] #70 수정 완료 - all-or-nothing 롤백 패턴 적용
+- [x] #71 수정 완료 - NumPad/OEM/방향키/특수키 전체 매핑 추가
+- [x] #72 수정 완료 - VirtualScreen.X/Y 기준 좌표 정규화
+- [x] #73 수정 완료 - while(File.Exists) 카운터 추가
+- [x] #74 수정 완료 - Uri.GetLeftPart(UriPartial.Path) 정확 매칭 + targetUrl 전달
+- [x] #75 수정 완료 - webp 선택 시 PNG로 대체 + 확장자도 .png
+- [ ] 실제 환경 검증: 창 캡처, 단축키 등록, 다중 모니터, 연속 캡처, URL 캡처

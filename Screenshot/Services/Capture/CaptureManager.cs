@@ -95,52 +95,44 @@ public class CaptureManager : IDisposable
     }
 
     /// <summary>
-    /// 특정 창 캡처 (WindowCaptureService 통합)
+    /// 특정 창 캡처 (WindowCaptureService 우선 사용)
     /// </summary>
     public async Task<CaptureResult> CaptureWindowAsync(IntPtr hWnd)
     {
         CaptureLogger.Info("Capture", $"=== 창 캡처: {hWnd} ===");
-        
+
         return await Task.Run(() =>
         {
-            // 1. 먼저 엔진들로 시도 (DXGI/GDI)
-            var result = ExecuteCapture(e => e.CaptureActiveWindow(), "Window");
-            if (result.Success && result.Image != null)
-            {
-                return result;
-            }
-
-            // 2. 엔진 실패시 WindowCaptureService 사용 (PrintWindow)
+            // 1. WindowCaptureService 우선 사용 (실제 창 영역만 캡처)
             try
             {
                 var windowService = new WindowCaptureService();
                 var bitmap = windowService.CaptureWindow(hWnd);
-                
+
                 if (bitmap != null && !IsBlackImage(bitmap))
                 {
-                    CaptureLogger.Info("Capture", "WindowCaptureService로 캡처 성공");
-                    return new CaptureResult
+                    CaptureLogger.Info("Capture", $"WindowCaptureService로 캡처 성공: {bitmap.Width}x{bitmap.Height}");
+                    var result = new CaptureResult
                     {
                         Success = true,
                         Image = bitmap,
                         EngineName = "PrintWindow",
                         CapturedAt = DateTime.Now
                     };
+                    ProcessCaptureResult(result);
+                    return result;
                 }
-                
+
                 bitmap?.Dispose();
+                CaptureLogger.Warn("Capture", "WindowCaptureService 실패, 엔진 캡처로 폴백");
             }
             catch (Exception ex)
             {
                 CaptureLogger.Error("Capture", "WindowCaptureService 실패", ex);
             }
 
-            return new CaptureResult
-            {
-                Success = false,
-                EngineName = "None",
-                ErrorMessage = "모든 창 캡처 방법 실패"
-            };
+            // 2. 엔진 폴백 (DXGI/GDI - 전체 화면)
+            return ExecuteCapture(e => e.CaptureActiveWindow(), "Window");
         });
     }
 
@@ -376,11 +368,17 @@ public class CaptureManager : IDisposable
         }
 
         var fileName = GenerateFileName();
-        var extension = _settings.ImageFormat.ToLower() switch
+        // .NET System.Drawing은 webp 미지원 → PNG로 대체 저장
+        var actualFormat = _settings.ImageFormat.ToLower();
+        if (actualFormat == "webp")
+        {
+            CaptureLogger.Warn("Save", "webp 미지원, PNG로 대체 저장");
+            actualFormat = "png";
+        }
+        var extension = actualFormat switch
         {
             "jpg" or "jpeg" => ".jpg",
             "bmp" => ".bmp",
-            "webp" => ".webp",
             _ => ".png"
         };
 
@@ -394,7 +392,7 @@ public class CaptureManager : IDisposable
             counter++;
         }
 
-        var format = _settings.ImageFormat.ToLower() switch
+        var format = actualFormat switch
         {
             "jpg" or "jpeg" => ImageFormat.Jpeg,
             "bmp" => ImageFormat.Bmp,

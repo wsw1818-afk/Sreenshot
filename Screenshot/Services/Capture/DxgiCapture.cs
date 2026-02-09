@@ -269,17 +269,27 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         {
             using var original = sourceImage;
 
-            // 요청 영역이 캡처 이미지 범위를 벗어나면 실패
-            if (region.X + region.Width > original.Width || region.Y + region.Height > original.Height
-                || region.X < 0 || region.Y < 0)
+            // VirtualScreen 기준 좌표 → 이미지 내 좌표로 정규화
+            // 다중 모니터에서 왼쪽/위 모니터가 있으면 VirtualScreen.X/Y가 음수
+            var virtualScreen2 = System.Windows.Forms.SystemInformation.VirtualScreen;
+            var normalizedRegion = new Rectangle(
+                region.X - virtualScreen2.X,
+                region.Y - virtualScreen2.Y,
+                region.Width,
+                region.Height);
+
+            // 정규화된 좌표로 범위 체크
+            if (normalizedRegion.X < 0 || normalizedRegion.Y < 0
+                || normalizedRegion.X + normalizedRegion.Width > original.Width
+                || normalizedRegion.Y + normalizedRegion.Height > original.Height)
             {
-                CaptureLogger.Warn("DXGI", $"CaptureRegion 범위 초과: region={region}, image={original.Width}x{original.Height}");
+                CaptureLogger.Warn("DXGI", $"CaptureRegion 범위 초과: region={region}, normalized={normalizedRegion}, image={original.Width}x{original.Height}");
                 return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역 범위 초과" };
             }
 
             var cropped = new Bitmap(region.Width, region.Height);
             using (var g = Graphics.FromImage(cropped))
-                g.DrawImage(original, new Rectangle(0, 0, region.Width, region.Height), region, GraphicsUnit.Pixel);
+                g.DrawImage(original, new Rectangle(0, 0, region.Width, region.Height), normalizedRegion, GraphicsUnit.Pixel);
 
             return new CaptureResult { Success = true, Image = cropped, EngineName = Name };
         }
