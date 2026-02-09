@@ -81,7 +81,6 @@ public class CaptureOverlayForm : Form
     private bool _showHelp = true;
     private bool _inputEnabled;
     private bool _closingByUser;
-    private int _deactivateCount;
     private System.Windows.Forms.Timer? _safetyTimer;
 
     // 그리기 리소스
@@ -154,62 +153,12 @@ public class CaptureOverlayForm : Form
         KeyDown += OnKeyDown;
         Paint += OnPaint;
 
-        // 포커스 상실 시: 타이머 기반 비동기 복구 → 3회 이상 반복 시 즉시 취소 (먹통 방지)
-        // ※ Deactivate 핸들러 내에서 동기적으로 SetForegroundWindow/ForceSetForeground를 호출하면
-        //    Deactivate→Activate→Deactivate 무한루프나 메시지 큐 교착이 발생할 수 있으므로
-        //    짧은 딜레이(100ms) 후 Timer로 복구한다.
+        // Deactivate 이벤트는 WndProc에서 WM_ACTIVATE(WA_INACTIVE)를 차단하므로
+        // 정상적으로는 발생하지 않지만, 만약 발생 시 로그만 남김
         Deactivate += (s, e) =>
         {
-            try
-            {
-                if (IsDisposed || _closingByUser || !IsHandleCreated) return;
-
-                // 드래그 중이든 아니든, Deactivate 카운트 증가 (드래그 중은 별도 로그만)
-                if (_isSelecting)
-                {
-                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "드래그 중 Deactivate 무시 - 타이머 복구");
-                }
-                else
-                {
-                    _deactivateCount++;
-                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                        $"Deactivate 발생 #{_deactivateCount}");
-                }
-
-                // 3회 이상 반복 Deactivate → 복구 불가 판단, 즉시 취소
-                if (_deactivateCount >= 3)
-                {
-                    Services.Capture.CaptureLogger.Warn("CaptureOverlayForm",
-                        "Deactivate 3회 반복 - 포커스 복구 불가, 즉시 취소");
-                    _closingByUser = true;
-                    DialogResult = DialogResult.Cancel;
-                    Close();
-                    return;
-                }
-
-                // ★ 동기 호출 하지 않음 - 100ms 딜레이 후 Timer로 복구
-                var recoverTimer = new System.Windows.Forms.Timer { Interval = 100 };
-                recoverTimer.Tick += (ts, te) =>
-                {
-                    recoverTimer.Stop();
-                    recoverTimer.Dispose();
-                    try
-                    {
-                        if (IsDisposed || _closingByUser || !IsHandleCreated) return;
-                        ForceSetForeground();
-                        Activate();
-                        Focus();
-                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "포커스 복구 시도 완료 (타이머)");
-                    }
-                    catch (ObjectDisposedException) { }
-                };
-                recoverTimer.Start();
-            }
-            catch (ObjectDisposedException) { }
-            catch (Exception ex)
-            {
-                Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", $"Deactivate 처리 중 예외: {ex.Message}");
-            }
+            Services.Capture.CaptureLogger.Warn("CaptureOverlayForm",
+                "Deactivate 이벤트 발생 (WndProc 차단 누락?)");
         };
 
         FormClosing += (s, e) =>
@@ -217,12 +166,11 @@ public class CaptureOverlayForm : Form
             Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
                 $"FormClosing: DialogResult={DialogResult}, CloseReason={e.CloseReason}, ByUser={_closingByUser}");
 
-            // 사용자가 닫은 게 아니면 (시스템 Deactivate 등) 닫기를 차단
+            // 사용자가 닫은 게 아니면 닫기를 차단 (WndProc에서 WM_ACTIVATE 차단하므로 거의 발생 안함)
             if (!_closingByUser && !IsDisposed)
             {
                 e.Cancel = true;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 (e.Cancel = true)");
-                // ★ FormClosing에서는 별도 복구 안함 - Deactivate 핸들러의 타이머가 이미 복구 처리
             }
         };
 
@@ -561,6 +509,44 @@ public class CaptureOverlayForm : Form
             _helpSubFont.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// WM_ACTIVATE 메시지에서 WA_INACTIVE를 차단하여 Deactivate 이벤트 자체를 방지.
+    /// 오버레이가 ShowDialog()로 표시된 동안에는 절대 포커스를 빼앗기지 않도록 한다.
+    /// 이를 통해 Deactivate→FormClosing→복구 시도→교착 상태 문제를 원천 차단.
+    /// </summary>
+    private const int WM_ACTIVATE = 0x0006;
+    private const int WA_INACTIVE = 0;
+    private const int WM_NCACTIVATE = 0x0086;
+
+    protected override void WndProc(ref Message m)
+    {
+        // WM_ACTIVATE: wParam의 하위 워드가 WA_INACTIVE(0)이면 비활성화 시도
+        if (m.Msg == WM_ACTIVATE && (m.WParam.ToInt32() & 0xFFFF) == WA_INACTIVE)
+        {
+            if (!_closingByUser)
+            {
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                    "WM_ACTIVATE(WA_INACTIVE) 차단");
+                // 메시지를 처리하지 않고 무시 (base.WndProc 호출 안함)
+                return;
+            }
+        }
+
+        // WM_NCACTIVATE: 비클라이언트 영역 비활성화도 차단
+        if (m.Msg == WM_NCACTIVATE && m.WParam == IntPtr.Zero)
+        {
+            if (!_closingByUser)
+            {
+                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                    "WM_NCACTIVATE(비활성) 차단");
+                m.Result = IntPtr.Zero; // 비활성화 거부
+                return;
+            }
+        }
+
+        base.WndProc(ref m);
     }
 
     /// <summary>
