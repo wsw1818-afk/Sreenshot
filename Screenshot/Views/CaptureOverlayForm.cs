@@ -154,33 +154,27 @@ public class CaptureOverlayForm : Form
         KeyDown += OnKeyDown;
         Paint += OnPaint;
 
-        // 포커스 상실 시: 복구 시도 → 3회 이상 반복 시 즉시 취소 (먹통 방지)
+        // 포커스 상실 시: 타이머 기반 비동기 복구 → 3회 이상 반복 시 즉시 취소 (먹통 방지)
+        // ※ Deactivate 핸들러 내에서 동기적으로 SetForegroundWindow/ForceSetForeground를 호출하면
+        //    Deactivate→Activate→Deactivate 무한루프나 메시지 큐 교착이 발생할 수 있으므로
+        //    짧은 딜레이(100ms) 후 Timer로 복구한다.
         Deactivate += (s, e) =>
         {
             try
             {
                 if (IsDisposed || _closingByUser || !IsHandleCreated) return;
 
-                // 드래그 중에는 Deactivate 무시 (마우스 조작으로 인한 일시적 포커스 상실)
+                // 드래그 중이든 아니든, Deactivate 카운트 증가 (드래그 중은 별도 로그만)
                 if (_isSelecting)
                 {
-                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "드래그 중 Deactivate 무시");
-                    BeginInvoke(() =>
-                    {
-                        try
-                        {
-                            if (IsDisposed || _closingByUser) return;
-                            ForceSetForeground();
-                            Activate();
-                        }
-                        catch (ObjectDisposedException) { }
-                    });
-                    return;
+                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "드래그 중 Deactivate 무시 - 타이머 복구");
                 }
-
-                _deactivateCount++;
-                Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
-                    $"Deactivate 발생 #{_deactivateCount}");
+                else
+                {
+                    _deactivateCount++;
+                    Services.Capture.CaptureLogger.Info("CaptureOverlayForm",
+                        $"Deactivate 발생 #{_deactivateCount}");
+                }
 
                 // 3회 이상 반복 Deactivate → 복구 불가 판단, 즉시 취소
                 if (_deactivateCount >= 3)
@@ -193,20 +187,23 @@ public class CaptureOverlayForm : Form
                     return;
                 }
 
-                // 강력한 포커스 복구: AttachThreadInput으로 전경 창 권한 획득
-                ForceSetForeground();
-
-                BeginInvoke(() =>
+                // ★ 동기 호출 하지 않음 - 100ms 딜레이 후 Timer로 복구
+                var recoverTimer = new System.Windows.Forms.Timer { Interval = 100 };
+                recoverTimer.Tick += (ts, te) =>
                 {
+                    recoverTimer.Stop();
+                    recoverTimer.Dispose();
                     try
                     {
-                        if (IsDisposed || _closingByUser) return;
+                        if (IsDisposed || _closingByUser || !IsHandleCreated) return;
+                        ForceSetForeground();
                         Activate();
                         Focus();
-                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "포커스 복구 시도 완료");
+                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "포커스 복구 시도 완료 (타이머)");
                     }
                     catch (ObjectDisposedException) { }
-                });
+                };
+                recoverTimer.Start();
             }
             catch (ObjectDisposedException) { }
             catch (Exception ex)
@@ -225,22 +222,7 @@ public class CaptureOverlayForm : Form
             {
                 e.Cancel = true;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 (e.Cancel = true)");
-
-                // 닫기 차단 후 키보드 포커스 재설정 (핸들 생성 전이면 무시)
-                if (IsHandleCreated)
-                {
-                    BeginInvoke(() =>
-                    {
-                        try
-                        {
-                            if (IsDisposed || _closingByUser) return;
-                            ForceSetForeground();
-                            Activate();
-                            Focus();
-                        }
-                        catch (ObjectDisposedException) { }
-                    });
-                }
+                // ★ FormClosing에서는 별도 복구 안함 - Deactivate 핸들러의 타이머가 이미 복구 처리
             }
         };
 
@@ -280,7 +262,7 @@ public class CaptureOverlayForm : Form
             Update();
 
             // 키보드 포커스 명시적 설정 (FormBorderStyle.None에서 자동 포커스 안 받는 문제 해결)
-            SetForegroundWindow(Handle);
+            ForceSetForeground();
             Activate();
             Focus();
 
