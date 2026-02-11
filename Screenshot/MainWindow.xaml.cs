@@ -476,7 +476,28 @@ public partial class MainWindow : Window
                             "BMP" => ImageFormat.Bmp,
                             _ => ImageFormat.Png
                         };
-                        result.Image.Save(filePath, format);
+
+                        // 스크롤 캡처는 2배 확대 저장 (AI 도구에서 축소 없이 읽을 수 있도록)
+                        var isScrollCapture = result.EngineName is "ScrollCapture" or "ChromeCDP";
+                        if (isScrollCapture && result.Image.Height > result.Image.Width)
+                        {
+                            var scale = 2.0;
+                            var newW = (int)(result.Image.Width * scale);
+                            var newH = (int)(result.Image.Height * scale);
+                            using var scaled = new Bitmap(newW, newH);
+                            using (var g = Graphics.FromImage(scaled))
+                            {
+                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                                g.DrawImage(result.Image, 0, 0, newW, newH);
+                            }
+                            scaled.Save(filePath, format);
+                            CaptureLogger.Info("MainWindow",
+                                $"[HandleCaptureResult] 스크롤 캡처 {scale}x 확대 저장: {result.Image.Width}x{result.Image.Height} → {newW}x{newH}");
+                        }
+                        else
+                        {
+                            result.Image.Save(filePath, format);
+                        }
                         result.SavedFilePath = filePath;
                         Services.Capture.CaptureLogger.Info("MainWindow", $"[HandleCaptureResult] 저장 성공: {filePath}");
                     }
