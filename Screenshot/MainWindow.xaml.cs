@@ -479,7 +479,9 @@ public partial class MainWindow : Window
 
                         // 스크롤 캡처는 2배 확대 저장 (AI 도구에서 축소 없이 읽을 수 있도록)
                         var isScrollCapture = result.EngineName is "ScrollCapture" or "ChromeCDP";
-                        if (isScrollCapture && result.Image.Height > result.Image.Width)
+                        CaptureLogger.Info("MainWindow",
+                            $"[HandleCaptureResult] EngineName={result.EngineName}, IsScroll={isScrollCapture}, Size={result.Image.Width}x{result.Image.Height}");
+                        if (isScrollCapture)
                         {
                             var scale = 2.0;
                             var newW = (int)(result.Image.Width * scale);
