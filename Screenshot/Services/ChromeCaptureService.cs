@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Net.WebSockets;
@@ -126,7 +127,9 @@ public class ChromeCaptureService
                 return await CaptureWithKeyboardScrollAsync(debugPort, url: targetUrl);
             }
 
-            StatusChanged?.Invoke($"전체 페이지 캡처 중... ({fullWidth}x{fullHeight})");
+            // 시스템 DPI 스케일 팩터 가져오기 (125% → 1.25)
+            var dpiScale = GetSystemDpiScale();
+            StatusChanged?.Invoke($"전체 페이지 캡처 중... ({fullWidth}x{fullHeight}, DPI={dpiScale:F2})");
 
             try
             {
@@ -135,7 +138,7 @@ public class ChromeCaptureService
                     mobile = false,
                     width = (int)fullWidth,
                     height = (int)fullHeight,
-                    deviceScaleFactor = 1
+                    deviceScaleFactor = dpiScale  // 시스템 DPI 반영 → 원본 크기 유지
                 });
 
                 await Task.Delay(500);
@@ -151,7 +154,7 @@ public class ChromeCaptureService
                         y = 0,
                         width = fullWidth,
                         height = fullHeight,
-                        scale = 1
+                        scale = dpiScale  // DPI 스케일 반영
                     }
                 });
 
@@ -637,14 +640,14 @@ public class ChromeCaptureService
     }
 
     /// <summary>
-    /// 여러 이미지를 세로로 합성
+    /// 여러 이미지를 세로로 합성 (높이 제한 없음)
     /// </summary>
     private static Bitmap StitchImages(List<Bitmap> captures)
     {
         int overlap = 150;
         int totalHeight = captures[0].Height + (captures.Count - 1) * (captures[0].Height - overlap);
 
-        var finalImage = new Bitmap(captures[0].Width, Math.Min(totalHeight, 16000));
+        var finalImage = new Bitmap(captures[0].Width, totalHeight);
         using var g = Graphics.FromImage(finalImage);
 
         int y = 0;
@@ -652,9 +655,6 @@ public class ChromeCaptureService
         {
             int srcY = i == 0 ? 0 : overlap;
             int srcHeight = i == 0 ? captures[i].Height : captures[i].Height - overlap;
-
-            if (y + srcHeight > finalImage.Height)
-                srcHeight = finalImage.Height - y;
 
             if (srcHeight > 0)
             {
@@ -667,5 +667,35 @@ public class ChromeCaptureService
         }
 
         return finalImage;
+    }
+
+    /// <summary>
+    /// 시스템 DPI 스케일 팩터 조회 (100%=1.0, 125%=1.25, 150%=1.5)
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+
+    private const int LOGPIXELSX = 88;
+
+    private static double GetSystemDpiScale()
+    {
+        try
+        {
+            var hdc = GetDC(IntPtr.Zero);
+            if (hdc != IntPtr.Zero)
+            {
+                int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+                ReleaseDC(IntPtr.Zero, hdc);
+                return dpi / 96.0; // 96 DPI = 100%
+            }
+        }
+        catch { }
+        return 1.0;
     }
 }
