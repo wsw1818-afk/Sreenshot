@@ -157,9 +157,9 @@ public partial class MainWindow : Window
         try
         {
             Hide();
-            await Task.Delay(200);
+            await Task.Delay(350); // DWM이 창 숨김 후 화면을 갱신할 충분한 시간
 
-            // DXGI 엔진으로 전체 화면 캡처 (CopyFromScreen이 검은 화면 반환하는 문제 우회)
+            // GDI BitBlt 우선, DXGI 폴백으로 전체 화면 캡처
             var rawResult = await _captureManager.CaptureFullScreenRawAsync();
             var capturedScreen = rawResult.Image;
 
@@ -254,26 +254,21 @@ public partial class MainWindow : Window
     private async Task CaptureWindowAsync()
     {
         if (_isCapturing) return;
-        _isCapturing = true;
 
+        // 창 선택 다이얼로그를 먼저 표시 (숨기기 전에)
+        var dialog = new WindowPickerDialog(_windowCaptureService) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedWindow == null)
+            return;
+
+        var selectedWindow = dialog.SelectedWindow;
+
+        _isCapturing = true;
         try
         {
             Hide();
-            await Task.Delay(200);
+            await Task.Delay(150);
 
-            // CaptureManager를 통해 활성 창 캡처 (DXGI → GDI → PrintWindow 순으로 시도)
-            var windowInfo = _windowCaptureService.GetForegroundWindowInfo();
-            CaptureResult result;
-            
-            if (windowInfo != null)
-            {
-                result = await _captureManager.CaptureWindowAsync(windowInfo.Handle);
-            }
-            else
-            {
-                // 창 정보를 가져올 수 없으면 기본 ActiveWindow 캡처
-                result = await _captureManager.CaptureActiveWindowAsync();
-            }
+            var result = await _captureManager.CaptureWindowAsync(selectedWindow.Handle);
 
             Show();
             InvalidateVisual();

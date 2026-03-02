@@ -372,7 +372,7 @@ public class ChromeCaptureService
     /// </summary>
     private async Task<string> ReceiveFullMessageAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        var buffer = new byte[64 * 1024]; // 64KB 버퍼
+        var buffer = new byte[512 * 1024]; // 512KB 버퍼 (대형 스크린샷 대응)
         var result = new StringBuilder();
 
         while (true)

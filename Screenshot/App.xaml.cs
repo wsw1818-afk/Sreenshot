@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using Screenshot.Services.Capture;
 
@@ -8,12 +9,42 @@ namespace Screenshot;
 /// </summary>
 public partial class App : System.Windows.Application
 {
+    private static Mutex? _mutex;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     [STAThread]
     public static void Main()
     {
-        var app = new App();
-        app.InitializeComponent();
-        app.Run();
+        _mutex = new Mutex(true, "SmartCapture_SingleInstance", out bool isNew);
+        if (!isNew)
+        {
+            // 기존 프로세스 창을 앞으로 가져오기
+            var current = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (var proc in System.Diagnostics.Process.GetProcessesByName(current.ProcessName))
+            {
+                if (proc.Id != current.Id && proc.MainWindowHandle != IntPtr.Zero)
+                {
+                    SetForegroundWindow(proc.MainWindowHandle);
+                    break;
+                }
+            }
+            _mutex.Dispose();
+            return;
+        }
+
+        try
+        {
+            var app = new App();
+            app.InitializeComponent();
+            app.Run();
+        }
+        finally
+        {
+            _mutex.ReleaseMutex();
+            _mutex.Dispose();
+        }
     }
 
     protected override void OnStartup(StartupEventArgs e)

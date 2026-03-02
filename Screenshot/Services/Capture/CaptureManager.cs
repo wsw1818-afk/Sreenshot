@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Screenshot.Models;
 
@@ -66,14 +67,14 @@ public class CaptureManager : IDisposable
     /// <summary>
     /// 이벤트 없이 전체 가상 화면 캡처 (영역 선택용)
     /// 다중 모니터 환경에서 VirtualScreen 전체를 캡처합니다.
-    /// DXGI는 단일 출력만 지원하므로, GDI BitBlt(VirtualScreen)을 우선 사용합니다.
+    /// GDI BitBlt을 우선 시도 (안정적), DXGI는 폴백으로 사용합니다.
     /// </summary>
     public async Task<CaptureResult> CaptureFullScreenRawAsync()
     {
         CaptureLogger.Info("Capture", "=== 전체 가상 화면 캡처 (Raw, 영역선택용) ===");
         var virtualBounds = System.Windows.Forms.SystemInformation.VirtualScreen;
         CaptureLogger.Info("Capture", $"VirtualScreen: {virtualBounds}");
-        return await Task.Run(() => ExecuteCaptureRaw(e => e.CaptureRegion(virtualBounds), "VirtualScreen"));
+        return await Task.Run(() => ExecuteCaptureRawWithGdiFirst(virtualBounds));
     }
 
     public async Task<CaptureResult> CaptureMonitorAsync(int monitorIndex)
@@ -94,46 +95,182 @@ public class CaptureManager : IDisposable
         return await Task.Run(() => ExecuteCapture(e => e.CaptureActiveWindow(), "ActiveWindow"));
     }
 
+    #region DXGI 창 캡처 폴백용 Win32 API
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    private const int SW_RESTORE = 9;
+    private const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+    #endregion
+
     /// <summary>
-    /// 특정 창 캡처 (WindowCaptureService 우선 사용)
+    /// 특정 창 캡처 (PrintWindow → BitBlt(WindowDC) → 화면DC 크롭 → DXGI 폴백)
+    /// Win11 24H2에서 GDI 기반 방법이 모두 실패할 수 있으므로
+    /// DXGI로 전체 화면 캡처 후 창 영역 크롭하는 최종 폴백을 포함합니다.
     /// </summary>
     public async Task<CaptureResult> CaptureWindowAsync(IntPtr hWnd)
     {
-        CaptureLogger.Info("Capture", $"=== 창 캡처: {hWnd} ===");
+        CaptureLogger.Info("Capture", $"=== 창 캡처: hWnd=0x{hWnd:X} ===");
 
         return await Task.Run(() =>
         {
-            // 1. WindowCaptureService 우선 사용 (실제 창 영역만 캡처)
+            var windowService = new WindowCaptureService();
+
             try
             {
-                var windowService = new WindowCaptureService();
                 var bitmap = windowService.CaptureWindow(hWnd);
 
-                if (bitmap != null && !IsBlackImage(bitmap))
+                if (bitmap != null)
                 {
-                    CaptureLogger.Info("Capture", $"WindowCaptureService로 캡처 성공: {bitmap.Width}x{bitmap.Height}");
+                    CaptureLogger.Info("Capture", $"WindowCaptureService 캡처 완료: {bitmap.Width}x{bitmap.Height}");
                     var result = new CaptureResult
                     {
                         Success = true,
                         Image = bitmap,
-                        EngineName = "PrintWindow",
+                        EngineName = "WindowCapture",
                         CapturedAt = DateTime.Now
                     };
                     ProcessCaptureResult(result);
                     return result;
                 }
-
-                bitmap?.Dispose();
-                CaptureLogger.Warn("Capture", "WindowCaptureService 실패, 엔진 캡처로 폴백");
+                else
+                {
+                    CaptureLogger.Warn("Capture", "WindowCaptureService null 반환 — DXGI 폴백 시도");
+                }
             }
             catch (Exception ex)
             {
-                CaptureLogger.Error("Capture", "WindowCaptureService 실패", ex);
+                CaptureLogger.Error("Capture", "WindowCaptureService 예외", ex);
             }
 
-            // 2. 엔진 폴백 (DXGI/GDI - 전체 화면)
-            return ExecuteCapture(e => e.CaptureActiveWindow(), "Window");
+            // ── DXGI 폴백: 창을 전면에 올린 후 DXGI 전체 캡처 → 창 영역 크롭 ──
+            try
+            {
+                var dxgiResult = CaptureWindowViaDxgi(hWnd);
+                if (dxgiResult != null)
+                {
+                    CaptureLogger.Info("Capture", $"DXGI 폴백 캡처 성공: {dxgiResult.Image!.Width}x{dxgiResult.Image.Height}");
+                    ProcessCaptureResult(dxgiResult);
+                    return dxgiResult;
+                }
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", "DXGI 폴백 예외", ex);
+            }
+
+            return new CaptureResult
+            {
+                Success = false,
+                EngineName = "WindowCapture",
+                ErrorMessage = "창 캡처 실패 (GDI + DXGI 모두 실패)"
+            };
         });
+    }
+
+    /// <summary>
+    /// DXGI 기반 창 캡처: 대상 창을 전면에 올린 후 DXGI로 전체 화면 캡처 → 창 영역 크롭.
+    /// Win11 24H2에서 PrintWindow/BitBlt/GetDC가 모두 검은 화면을 반환할 때의 최종 폴백.
+    /// </summary>
+    private CaptureResult? CaptureWindowViaDxgi(IntPtr hWnd)
+    {
+        var dxgiEngine = _engines.FirstOrDefault(e => e is DxgiCapture && e.IsAvailable) as DxgiCapture;
+        if (dxgiEngine == null)
+        {
+            CaptureLogger.Warn("Capture", "DXGI 엔진 사용 불가 — DXGI 폴백 불가");
+            return null;
+        }
+
+        // 1. 최소화된 창 복원
+        if (IsIconic(hWnd))
+        {
+            ShowWindow(hWnd, SW_RESTORE);
+            Thread.Sleep(500);
+        }
+
+        // 2. 대상 창을 전면에 올리기
+        SetForegroundWindow(hWnd);
+        for (int wait = 0; wait < 15; wait++)
+        {
+            Thread.Sleep(100);
+            if (GetForegroundWindow() == hWnd) break;
+        }
+        // DWM 렌더링 대기
+        Thread.Sleep(300);
+
+        // 3. DWM으로 최신 창 경계 가져오기
+        Rectangle windowBounds;
+        if (DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out RECT dwmRect, Marshal.SizeOf<RECT>()) == 0)
+        {
+            windowBounds = new Rectangle(dwmRect.Left, dwmRect.Top,
+                dwmRect.Right - dwmRect.Left, dwmRect.Bottom - dwmRect.Top);
+        }
+        else
+        {
+            CaptureLogger.Warn("Capture", "DWM 창 경계 조회 실패");
+            return null;
+        }
+
+        CaptureLogger.Info("Capture", $"DXGI 폴백: 창 bounds={windowBounds}, foreground=0x{GetForegroundWindow():X}");
+
+        if (windowBounds.Width <= 0 || windowBounds.Height <= 0)
+        {
+            CaptureLogger.Warn("Capture", "DXGI 폴백: 잘못된 창 경계");
+            return null;
+        }
+
+        // 4. DXGI로 영역 캡처 (CaptureRegion은 VirtualScreen 캡처 → 크롭)
+        // 최대 3회 시도
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                var regionResult = dxgiEngine.CaptureRegion(windowBounds);
+
+                if (regionResult.Success && regionResult.Image != null && !IsBlackImage(regionResult.Image))
+                {
+                    CaptureLogger.Info("Capture", $"DXGI 폴백 시도 {attempt + 1}: 성공 {regionResult.Image.Width}x{regionResult.Image.Height}");
+                    return new CaptureResult
+                    {
+                        Success = true,
+                        Image = regionResult.Image,
+                        EngineName = "WindowCapture (DXGI)",
+                        CapturedAt = DateTime.Now
+                    };
+                }
+
+                regionResult.Image?.Dispose();
+                CaptureLogger.Warn("Capture", $"DXGI 폴백 시도 {attempt + 1}: 검은 화면 또는 실패");
+
+                if (attempt < 2)
+                    Thread.Sleep(300 * (attempt + 1));
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", $"DXGI 폴백 시도 {attempt + 1} 예외", ex);
+                if (attempt < 2) Thread.Sleep(300);
+            }
+        }
+
+        CaptureLogger.Warn("Capture", "DXGI 폴백: 3회 시도 모두 실패");
+        return null;
     }
 
     private CaptureResult ExecuteCapture(Func<ICaptureEngine, CaptureResult> captureFunc, string mode, Rectangle? region = null)
@@ -279,6 +416,69 @@ public class CaptureManager : IDisposable
             Success = false,
             EngineName = "None",
             ErrorMessage = "모든 캡처 방법 실패 (Raw)"
+        };
+    }
+
+    /// <summary>
+    /// 영역 선택용 VirtualScreen 캡처: GDI BitBlt 우선, DXGI 폴백
+    /// DXGI CaptureVirtualScreen은 세션 재초기화 비용이 크고 첫 프레임이 검은 화면일 수 있으므로
+    /// GDI BitBlt(데스크톱 DC)을 먼저 시도합니다.
+    /// </summary>
+    private CaptureResult ExecuteCaptureRawWithGdiFirst(System.Drawing.Rectangle virtualBounds)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // 1. GDI BitBlt 우선 시도 (안정적, 빠름)
+        var gdiEngine = _engines.FirstOrDefault(e => e is GdiCapture && e.IsAvailable);
+        if (gdiEngine != null)
+        {
+            CaptureLogger.LogCaptureAttempt(gdiEngine.Name, "VirtualScreen (Raw, GDI우선)", null);
+            try
+            {
+                var result = gdiEngine.CaptureRegion(virtualBounds);
+                if (result?.Success == true && result.Image != null && !IsBlackImage(result.Image))
+                {
+                    sw.Stop();
+                    CaptureLogger.Info("Capture", $"Raw GDI 성공 ({sw.ElapsedMilliseconds}ms)");
+                    return result;
+                }
+                result?.Image?.Dispose();
+                CaptureLogger.Warn("Capture", "GDI BitBlt 검은 화면, DXGI 폴백 시도");
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", $"[GDI] Raw 예외", ex);
+            }
+        }
+
+        // 2. DXGI 폴백
+        var dxgiEngine = _engines.FirstOrDefault(e => e is DxgiCapture && e.IsAvailable);
+        if (dxgiEngine != null)
+        {
+            CaptureLogger.LogCaptureAttempt(dxgiEngine.Name, "VirtualScreen (Raw, DXGI폴백)", null);
+            try
+            {
+                var result = dxgiEngine.CaptureRegion(virtualBounds);
+                if (result?.Success == true && result.Image != null && !IsBlackImage(result.Image))
+                {
+                    sw.Stop();
+                    CaptureLogger.Info("Capture", $"Raw DXGI 성공 ({sw.ElapsedMilliseconds}ms)");
+                    return result;
+                }
+                result?.Image?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                CaptureLogger.Error("Capture", $"[DXGI] Raw 예외", ex);
+            }
+        }
+
+        sw.Stop();
+        return new CaptureResult
+        {
+            Success = false,
+            EngineName = "None",
+            ErrorMessage = "영역 캡처 실패: GDI/DXGI 모두 검은 화면"
         };
     }
 

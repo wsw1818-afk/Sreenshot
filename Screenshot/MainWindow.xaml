@@ -6,6 +6,7 @@
         xmlns:tb="http://www.hardcodet.net/taskbar"
         mc:Ignorable="d"
         Title="Smart Capture"
+        Icon="Resources/Icons/app.ico"
         Height="500" Width="700"
         MinHeight="400" MinWidth="600"
         WindowStartupLocation="CenterScreen"
@@ -264,6 +265,7 @@
 
         <!-- 시스템 트레이 아이콘 -->
         <tb:TaskbarIcon x:Name="TrayIcon"
+                        IconSource="Resources/Icons/app.ico"
                         ToolTipText="Smart Capture"
                         TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
             <tb:TaskbarIcon.ContextMenu>

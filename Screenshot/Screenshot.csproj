@@ -11,6 +11,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>SmartCapture</AssemblyName>
     <RootNamespace>Screenshot</RootNamespace>
+    <ApplicationIcon>Resources\Icons\app.ico</ApplicationIcon>
 
     <!-- Per-Monitor DPI Awareness V2 -->
     <WindowsPackageType>None</WindowsPackageType>
@@ -25,6 +26,10 @@
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\Icons\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- 시스템 트레이 아이콘 -->

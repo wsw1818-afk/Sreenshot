@@ -243,23 +243,21 @@ public class DxgiCapture : ICaptureEngine, IDisposable
 
     public CaptureResult CaptureRegion(Rectangle region)
     {
-        // 가상 화면 전체가 필요한 경우 다중 모니터 합성 캡처 사용
         var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
         Bitmap? sourceImage = null;
 
-        if (region.Width >= virtualScreen.Width && region.Height >= virtualScreen.Height)
+        // 다중 모니터 환경 여부 관계없이 항상 VirtualScreen 합성 캡처 시도
+        // → 단일 모니터에서는 주 모니터만 캡처하는 것과 동일하나,
+        //   확장 모니터에서 영역 선택 시 검은 화면 문제를 방지
+        var vsResult = CaptureVirtualScreen();
+        if (vsResult.Success && vsResult.Image != null)
         {
-            // VirtualScreen 전체 요청 → 다중 모니터 합성 캡처
-            var vsResult = CaptureVirtualScreen();
-            if (vsResult.Success && vsResult.Image != null)
-            {
-                sourceImage = vsResult.Image;
-            }
+            sourceImage = vsResult.Image;
         }
 
         if (sourceImage == null)
         {
-            // 단일 모니터 범위 또는 VirtualScreen 캡처 실패 → 주 모니터 캡처
+            // VirtualScreen 합성 캡처 실패 → 주 모니터 단독 폴백
             var result = CaptureFullScreen();
             if (!result.Success || result.Image == null) return result;
             sourceImage = result.Image;
@@ -325,7 +323,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                 try
                 {
                     adapter = factory.GetAdapter1(ai);
-                    for (int oi = 0; ; oi++)
+                    for (int oi = 0; oi < 16; oi++)
                     {
                         Output? output = null;
                         Output1? output1 = null;
@@ -349,28 +347,50 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                             duplication = output1.DuplicateOutput(device);
 
                             try { duplication.ReleaseFrame(); } catch { }
-                            Thread.Sleep(100);
+                            Thread.Sleep(150);
 
-                            var frameResult = duplication.TryAcquireNextFrame(2000, out _, out var resource);
-                            if (frameResult.Success)
+                            // 첫 프레임이 검은 화면일 수 있으므로 최대 3회 재시도
+                            Bitmap? capturedBmp = null;
+                            for (int retry = 0; retry < 3; retry++)
                             {
-                                try
+                                var frameResult = duplication.TryAcquireNextFrame(2000, out _, out var resource);
+                                if (frameResult.Success)
                                 {
-                                    using var texture = resource.QueryInterface<Texture2D>();
-                                    var bmp = TextureToBitmapStatic(device, texture);
+                                    try
+                                    {
+                                        using var texture = resource.QueryInterface<Texture2D>();
+                                        var bmp = TextureToBitmapStatic(device, texture);
 
-                                    CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: Texture={bmp.Width}x{bmp.Height}, LogicalBounds={bounds.Width}x{bounds.Height}");
+                                        if (!CaptureEngineBase.IsBlackImage(bmp))
+                                        {
+                                            capturedBmp = bmp;
+                                            break;
+                                        }
 
-                                    capturedMonitors.Add((bmp, bounds));
+                                        CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 시도 {retry + 1}: 검은 화면, 재시도");
+                                        bmp.Dispose();
+                                    }
+                                    finally
+                                    {
+                                        duplication.ReleaseFrame();
+                                    }
+                                    Thread.Sleep(200 * (retry + 1));
                                 }
-                                finally
+                                else
                                 {
-                                    duplication.ReleaseFrame();
+                                    CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 시도 {retry + 1}: 프레임 획득 실패");
+                                    Thread.Sleep(200);
                                 }
+                            }
+
+                            if (capturedBmp != null)
+                            {
+                                CaptureLogger.Info("DXGI", $"출력 [{ai}:{oi}] 캡처 성공: Texture={capturedBmp.Width}x{capturedBmp.Height}, LogicalBounds={bounds.Width}x{bounds.Height}");
+                                capturedMonitors.Add((capturedBmp, bounds));
                             }
                             else
                             {
-                                CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 프레임 획득 실패");
+                                CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 3회 재시도 후 실패 (검은 화면)");
                             }
                         }
                         catch (SharpDXException ex) when (ex.ResultCode == SharpDX.DXGI.ResultCode.NotFound)
@@ -406,21 +426,24 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             }
 
             // VirtualScreen(논리 좌표) 크기 비트맵에 합성
-            // 각 모니터 텍스처(물리 픽셀)를 논리 좌표 위치에 원본 크기로 배치
+            // 각 모니터 텍스처(물리 픽셀)를 해당 모니터의 논리 크기로 스케일링하여 배치
+            // → DPI 스케일링 환경에서 물리 해상도 ≠ 논리 해상도인 경우도 올바르게 처리
             var composite = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
             composite.SetResolution(96f, 96f);
             using (var g = Graphics.FromImage(composite))
             {
                 g.Clear(Color.Black);
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 foreach (var (bmp, bounds) in capturedMonitors)
                 {
                     bmp.SetResolution(96f, 96f);
                     // 모니터 좌표를 VirtualScreen 상대 좌표로 변환
                     int x = bounds.X - virtualScreen.X;
                     int y = bounds.Y - virtualScreen.Y;
-                    // 물리 텍스처 원본 크기로 그리기 (확대/축소 없음)
-                    g.DrawImage(bmp, x, y, bmp.Width, bmp.Height);
-                    CaptureLogger.Info("DXGI", $"합성: pos=({x},{y}), drawSize={bmp.Width}x{bmp.Height}, logicalBounds={bounds.Width}x{bounds.Height}");
+                    // 물리 텍스처를 논리 크기에 맞게 스케일링하여 배치 (DPI 보정)
+                    var destRect = new Rectangle(x, y, bounds.Width, bounds.Height);
+                    g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel);
+                    CaptureLogger.Info("DXGI", $"합성: pos=({x},{y}), destSize={bounds.Width}x{bounds.Height}, physTex={bmp.Width}x{bmp.Height}");
                     bmp.Dispose();
                 }
             }

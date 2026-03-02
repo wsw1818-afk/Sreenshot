@@ -135,6 +135,7 @@ public class HotkeyService : IDisposable
         if (hs.Ctrl) mod |= MOD_CONTROL;
         if (hs.Shift) mod |= MOD_SHIFT;
         if (hs.Alt) mod |= MOD_ALT;
+        if (hs.Win) mod |= MOD_WIN;
 
         uint vk = KeyNameToVk(hs.Key);
         if (vk == 0) return (defaultMod, defaultVk); // 변환 실패 시 기본값
@@ -150,6 +151,8 @@ public class HotkeyService : IDisposable
         return keyName.ToUpperInvariant() switch
         {
             "PRINTSCREEN" or "SNAPSHOT" => 0x2C,
+            // Win 키
+            "WIN" or "LWIN" => 0x5B, "RWIN" => 0x5C,
             // A-Z
             "A" => 0x41, "B" => 0x42, "C" => 0x43, "D" => 0x44,
             "E" => 0x45, "F" => 0x46, "G" => 0x47, "H" => 0x48,

@@ -160,6 +160,12 @@ public class AppSettings
             };
 
             var json = JsonSerializer.Serialize(this, options);
+
+            // 기존 파일을 .bak으로 백업 후 저장 (저장 중 실패 시 데이터 손실 방지)
+            var backupPath = SettingsPath + ".bak";
+            if (File.Exists(SettingsPath))
+                File.Copy(SettingsPath, backupPath, overwrite: true);
+
             File.WriteAllText(SettingsPath, json);
         }
         catch (Exception ex)
@@ -173,17 +179,39 @@ public class AppSettings
     /// </summary>
     public static AppSettings Load()
     {
-        try
+        // 1순위: 정상 설정 파일
+        if (File.Exists(SettingsPath))
         {
-            if (File.Exists(SettingsPath))
+            try
             {
                 var json = File.ReadAllText(SettingsPath);
-                return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                if (settings != null) return settings;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"설정 불러오기 실패, 백업 시도: {ex.Message}");
             }
         }
-        catch (Exception ex)
+
+        // 2순위: 백업 파일로 복구
+        var backupPath = SettingsPath + ".bak";
+        if (File.Exists(backupPath))
         {
-            System.Diagnostics.Debug.WriteLine($"설정 불러오기 실패: {ex.Message}");
+            try
+            {
+                var json = File.ReadAllText(backupPath);
+                var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                if (settings != null)
+                {
+                    System.Diagnostics.Debug.WriteLine("설정 백업 파일로 복구됨");
+                    return settings;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"백업 파일 복구 실패: {ex.Message}");
+            }
         }
 
         return new AppSettings();
@@ -201,20 +229,23 @@ public class HotkeySettings
     public bool Ctrl { get; set; }
     public bool Shift { get; set; }
     public bool Alt { get; set; }
+    public bool Win { get; set; }
 
     public HotkeySettings() { }
 
-    public HotkeySettings(string key, bool ctrl, bool shift, bool alt)
+    public HotkeySettings(string key, bool ctrl, bool shift, bool alt, bool win = false)
     {
         Key = key;
         Ctrl = ctrl;
         Shift = shift;
         Alt = alt;
+        Win = win;
     }
 
     public override string ToString()
     {
         var parts = new List<string>();
+        if (Win) parts.Add("Win");
         if (Ctrl) parts.Add("Ctrl");
         if (Shift) parts.Add("Shift");
         if (Alt) parts.Add("Alt");
