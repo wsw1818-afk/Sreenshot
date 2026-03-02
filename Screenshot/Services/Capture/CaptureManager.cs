@@ -228,15 +228,22 @@ public class CaptureManager : IDisposable
             return null;
         }
 
-        CaptureLogger.Info("Capture", $"DXGI 폴백: 창 bounds={windowBounds}, foreground=0x{GetForegroundWindow():X}");
+        CaptureLogger.Info("Capture", $"DXGI 폴백: 원본 bounds={windowBounds}, foreground=0x{GetForegroundWindow():X}");
+
+        // 4. 창 경계를 VirtualScreen 범위로 클리핑
+        //    최대화된 창은 화면 밖으로 삐져나오는 경우가 많음 (X=-7, Y=-7 등)
+        var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
+        windowBounds = Rectangle.Intersect(windowBounds, virtualScreen);
+
+        CaptureLogger.Info("Capture", $"DXGI 폴백: 클리핑 후 bounds={windowBounds}, virtualScreen={virtualScreen}");
 
         if (windowBounds.Width <= 0 || windowBounds.Height <= 0)
         {
-            CaptureLogger.Warn("Capture", "DXGI 폴백: 잘못된 창 경계");
+            CaptureLogger.Warn("Capture", "DXGI 폴백: 클리핑 후 잘못된 창 경계");
             return null;
         }
 
-        // 4. DXGI로 영역 캡처 (CaptureRegion은 VirtualScreen 캡처 → 크롭)
+        // 5. DXGI로 영역 캡처 (CaptureRegion은 VirtualScreen 캡처 → 크롭)
         // 최대 3회 시도
         for (int attempt = 0; attempt < 3; attempt++)
         {

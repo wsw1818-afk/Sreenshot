@@ -276,18 +276,21 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                 region.Width,
                 region.Height);
 
-            // 정규화된 좌표로 범위 체크
-            if (normalizedRegion.X < 0 || normalizedRegion.Y < 0
-                || normalizedRegion.X + normalizedRegion.Width > original.Width
-                || normalizedRegion.Y + normalizedRegion.Height > original.Height)
+            // 이미지 범위로 클리핑 (최대화 창이 화면 밖으로 삐져나오는 경우 대비)
+            var imageRect = new Rectangle(0, 0, original.Width, original.Height);
+            normalizedRegion = Rectangle.Intersect(normalizedRegion, imageRect);
+
+            if (normalizedRegion.Width <= 0 || normalizedRegion.Height <= 0)
             {
-                CaptureLogger.Warn("DXGI", $"CaptureRegion 범위 초과: region={region}, normalized={normalizedRegion}, image={original.Width}x{original.Height}");
+                CaptureLogger.Warn("DXGI", $"CaptureRegion 클리핑 후 빈 영역: region={region}, image={original.Width}x{original.Height}");
                 return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역 범위 초과" };
             }
 
-            var cropped = new Bitmap(region.Width, region.Height);
+            CaptureLogger.Verbose("DXGI", $"CaptureRegion: normalized={normalizedRegion}, image={original.Width}x{original.Height}");
+
+            var cropped = new Bitmap(normalizedRegion.Width, normalizedRegion.Height);
             using (var g = Graphics.FromImage(cropped))
-                g.DrawImage(original, new Rectangle(0, 0, region.Width, region.Height), normalizedRegion, GraphicsUnit.Pixel);
+                g.DrawImage(original, new Rectangle(0, 0, normalizedRegion.Width, normalizedRegion.Height), normalizedRegion, GraphicsUnit.Pixel);
 
             return new CaptureResult { Success = true, Image = cropped, EngineName = Name };
         }
