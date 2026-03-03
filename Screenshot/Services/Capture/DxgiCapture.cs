@@ -24,6 +24,10 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     private DateTime _lastAvailabilityCheck;
     private static readonly TimeSpan AvailabilityCacheTime = TimeSpan.FromSeconds(30);
     private static readonly object AvailabilityLock = new();
+
+    // 다중 모니터 논리↔물리 매핑 (CaptureVirtualScreen에서 설정, CaptureRegion에서 사용)
+    private record MonitorMapping(Rectangle LogicalBounds, Rectangle PhysicalBounds, int PhysicalX, int PhysicalY);
+    private List<MonitorMapping>? _lastMonitorMappings;
     
     public string Name => "DXGI Hardware";
     public int Priority => 1; // 최우선
@@ -243,12 +247,9 @@ public class DxgiCapture : ICaptureEngine, IDisposable
 
     public CaptureResult CaptureRegion(Rectangle region)
     {
-        var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
         Bitmap? sourceImage = null;
 
         // 다중 모니터 환경 여부 관계없이 항상 VirtualScreen 합성 캡처 시도
-        // → 단일 모니터에서는 주 모니터만 캡처하는 것과 동일하나,
-        //   확장 모니터에서 영역 선택 시 검은 화면 문제를 방지
         var vsResult = CaptureVirtualScreen();
         if (vsResult.Success && vsResult.Image != null)
         {
@@ -258,6 +259,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         if (sourceImage == null)
         {
             // VirtualScreen 합성 캡처 실패 → 주 모니터 단독 폴백
+            _lastMonitorMappings = null;
             var result = CaptureFullScreen();
             if (!result.Success || result.Image == null) return result;
             sourceImage = result.Image;
@@ -267,30 +269,24 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         {
             using var original = sourceImage;
 
-            // VirtualScreen 기준 좌표 → 이미지 내 좌표로 정규화
-            // 다중 모니터에서 왼쪽/위 모니터가 있으면 VirtualScreen.X/Y가 음수
-            var virtualScreen2 = System.Windows.Forms.SystemInformation.VirtualScreen;
-            var normalizedRegion = new Rectangle(
-                region.X - virtualScreen2.X,
-                region.Y - virtualScreen2.Y,
-                region.Width,
-                region.Height);
+            // 논리 좌표 → 물리 좌표 변환 (모니터 매핑 테이블 사용)
+            var physRegion = LogicalToPhysicalRegion(region, original.Width, original.Height);
 
-            // 이미지 범위로 클리핑 (최대화 창이 화면 밖으로 삐져나오는 경우 대비)
+            // 이미지 범위로 클리핑
             var imageRect = new Rectangle(0, 0, original.Width, original.Height);
-            normalizedRegion = Rectangle.Intersect(normalizedRegion, imageRect);
+            physRegion = Rectangle.Intersect(physRegion, imageRect);
 
-            if (normalizedRegion.Width <= 0 || normalizedRegion.Height <= 0)
+            if (physRegion.Width <= 0 || physRegion.Height <= 0)
             {
-                CaptureLogger.Warn("DXGI", $"CaptureRegion 클리핑 후 빈 영역: region={region}, image={original.Width}x{original.Height}");
+                CaptureLogger.Warn("DXGI", $"CaptureRegion 클리핑 후 빈 영역: region={region}, physRegion={physRegion}, image={original.Width}x{original.Height}");
                 return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 캡처 영역 범위 초과" };
             }
 
-            CaptureLogger.Verbose("DXGI", $"CaptureRegion: normalized={normalizedRegion}, image={original.Width}x{original.Height}");
+            CaptureLogger.Info("DXGI", $"CaptureRegion: logical={region} → physical={physRegion}, image={original.Width}x{original.Height}");
 
-            var cropped = new Bitmap(normalizedRegion.Width, normalizedRegion.Height);
+            var cropped = new Bitmap(physRegion.Width, physRegion.Height);
             using (var g = Graphics.FromImage(cropped))
-                g.DrawImage(original, new Rectangle(0, 0, normalizedRegion.Width, normalizedRegion.Height), normalizedRegion, GraphicsUnit.Pixel);
+                g.DrawImage(original, new Rectangle(0, 0, physRegion.Width, physRegion.Height), physRegion, GraphicsUnit.Pixel);
 
             return new CaptureResult { Success = true, Image = cropped, EngineName = Name };
         }
@@ -298,6 +294,68 @@ public class DxgiCapture : ICaptureEngine, IDisposable
         {
             return new CaptureResult { Success = false, ErrorMessage = ex.Message };
         }
+    }
+
+    /// <summary>
+    /// 논리 좌표(VirtualScreen 기준) → 물리 좌표(합성 이미지 기준) 변환.
+    /// 각 모니터의 DPI 스케일링을 고려하여 정확한 물리 픽셀 위치를 계산합니다.
+    /// </summary>
+    private Rectangle LogicalToPhysicalRegion(Rectangle logicalRegion, int imageWidth, int imageHeight)
+    {
+        var mappings = _lastMonitorMappings;
+        if (mappings == null || mappings.Count == 0)
+        {
+            // 매핑 없음 (단일 모니터 또는 FullScreen 폴백) → VirtualScreen 오프셋만 적용
+            var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
+            return new Rectangle(
+                logicalRegion.X - vs.X,
+                logicalRegion.Y - vs.Y,
+                logicalRegion.Width,
+                logicalRegion.Height);
+        }
+
+        // 영역이 여러 모니터에 걸칠 수 있으므로, 각 모니터별로 교차 영역을 물리 좌표로 변환 후 합성
+        int physLeft = int.MaxValue, physTop = int.MaxValue;
+        int physRight = int.MinValue, physBottom = int.MinValue;
+        bool hasIntersection = false;
+
+        foreach (var m in mappings)
+        {
+            var intersection = Rectangle.Intersect(logicalRegion, m.LogicalBounds);
+            if (intersection.Width <= 0 || intersection.Height <= 0) continue;
+
+            hasIntersection = true;
+
+            // 논리 좌표에서 모니터 내 상대 위치 (0~1 비율)
+            double relX = (double)(intersection.X - m.LogicalBounds.X) / m.LogicalBounds.Width;
+            double relY = (double)(intersection.Y - m.LogicalBounds.Y) / m.LogicalBounds.Height;
+            double relW = (double)intersection.Width / m.LogicalBounds.Width;
+            double relH = (double)intersection.Height / m.LogicalBounds.Height;
+
+            // 물리 좌표로 변환
+            int pX = m.PhysicalBounds.X + (int)(relX * m.PhysicalBounds.Width);
+            int pY = m.PhysicalBounds.Y + (int)(relY * m.PhysicalBounds.Height);
+            int pR = m.PhysicalBounds.X + (int)((relX + relW) * m.PhysicalBounds.Width);
+            int pB = m.PhysicalBounds.Y + (int)((relY + relH) * m.PhysicalBounds.Height);
+
+            physLeft = Math.Min(physLeft, pX);
+            physTop = Math.Min(physTop, pY);
+            physRight = Math.Max(physRight, pR);
+            physBottom = Math.Max(physBottom, pB);
+        }
+
+        if (!hasIntersection)
+        {
+            // 어떤 모니터와도 겹치지 않음 → 기본 변환
+            var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
+            return new Rectangle(
+                logicalRegion.X - vs.X,
+                logicalRegion.Y - vs.Y,
+                logicalRegion.Width,
+                logicalRegion.Height);
+        }
+
+        return new Rectangle(physLeft, physTop, physRight - physLeft, physBottom - physTop);
     }
 
     /// <summary>
@@ -428,30 +486,43 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                 return new CaptureResult { Success = false, EngineName = Name, ErrorMessage = "DXGI 다중 모니터 캡처: 캡처된 출력 없음" };
             }
 
-            // VirtualScreen(논리 좌표) 크기 비트맵에 합성
-            // 각 모니터 텍스처(물리 픽셀)를 해당 모니터의 논리 크기로 스케일링하여 배치
-            // → DPI 스케일링 환경에서 물리 해상도 ≠ 논리 해상도인 경우도 올바르게 처리
-            var composite = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
+            // 물리 해상도 기반으로 합성 (스케일업 없이 원본 품질 유지)
+            // 각 모니터의 물리 텍스처를 원본 크기 그대로 나란히 배치
+            var mappings = new List<MonitorMapping>();
+            int totalPhysWidth = 0;
+            int maxPhysHeight = 0;
+
+            // 논리 X 좌표 순서대로 정렬 후, 물리 텍스처를 순서대로 배치
+            var sorted = capturedMonitors.OrderBy(m => m.bounds.X).ThenBy(m => m.bounds.Y).ToList();
+            foreach (var (bmp, bounds) in sorted)
+            {
+                var physBounds = new Rectangle(totalPhysWidth, 0, bmp.Width, bmp.Height);
+                mappings.Add(new MonitorMapping(bounds, physBounds, totalPhysWidth, 0));
+                CaptureLogger.Info("DXGI", $"매핑: logical={bounds} → physical=({totalPhysWidth},0,{bmp.Width},{bmp.Height})");
+                totalPhysWidth += bmp.Width;
+                maxPhysHeight = Math.Max(maxPhysHeight, bmp.Height);
+            }
+
+            _lastMonitorMappings = mappings;
+
+            var composite = new Bitmap(totalPhysWidth, maxPhysHeight, PixelFormat.Format32bppArgb);
             composite.SetResolution(96f, 96f);
             using (var g = Graphics.FromImage(composite))
             {
                 g.Clear(Color.Black);
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                foreach (var (bmp, bounds) in capturedMonitors)
+                for (int i = 0; i < sorted.Count; i++)
                 {
+                    var (bmp, _) = sorted[i];
+                    var mapping = mappings[i];
                     bmp.SetResolution(96f, 96f);
-                    // 모니터 좌표를 VirtualScreen 상대 좌표로 변환
-                    int x = bounds.X - virtualScreen.X;
-                    int y = bounds.Y - virtualScreen.Y;
-                    // 물리 텍스처를 논리 크기에 맞게 스케일링하여 배치 (DPI 보정)
-                    var destRect = new Rectangle(x, y, bounds.Width, bounds.Height);
-                    g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel);
-                    CaptureLogger.Info("DXGI", $"합성: pos=({x},{y}), destSize={bounds.Width}x{bounds.Height}, physTex={bmp.Width}x{bmp.Height}");
+                    // 물리 텍스처를 원본 크기 그대로 배치 (스케일링 없음)
+                    g.DrawImage(bmp, mapping.PhysicalX, mapping.PhysicalY);
+                    CaptureLogger.Info("DXGI", $"합성: physPos=({mapping.PhysicalX},{mapping.PhysicalY}), physSize={bmp.Width}x{bmp.Height}");
                     bmp.Dispose();
                 }
             }
 
-            CaptureLogger.Info("DXGI", $"다중 모니터 합성 완료: {composite.Width}x{composite.Height}, 모니터 {capturedMonitors.Count}개");
+            CaptureLogger.Info("DXGI", $"다중 모니터 합성 완료(물리): {composite.Width}x{composite.Height}, 모니터 {capturedMonitors.Count}개");
             return new CaptureResult { Success = true, Image = composite, EngineName = Name };
         }
         catch (Exception ex)
