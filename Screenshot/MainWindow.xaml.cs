@@ -121,7 +121,11 @@ public partial class MainWindow : Window
 
     private async Task CaptureFullScreenAsync()
     {
-        if (_isCapturing) return;
+        if (_isCapturing)
+        {
+            StatusText.Text = "캡처 진행 중...";
+            return;
+        }
         _isCapturing = true;
 
         try
@@ -132,7 +136,16 @@ public partial class MainWindow : Window
             if (wasVisible) Hide();
             await Task.Delay(200);
 
-            var result = await _captureManager.CaptureFullScreenAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            CaptureResult result;
+            try
+            {
+                result = await _captureManager.CaptureFullScreenAsync().WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                result = new CaptureResult { Success = false, ErrorMessage = "캡처 시간 초과 (10초)" };
+            }
 
             if (wasVisible)
             {
@@ -151,7 +164,11 @@ public partial class MainWindow : Window
 
     private async Task CaptureRegionAsync()
     {
-        if (_isCapturing) return;
+        if (_isCapturing)
+        {
+            StatusText.Text = "캡처 진행 중...";
+            return;
+        }
         _isCapturing = true;
 
         try
@@ -160,7 +177,20 @@ public partial class MainWindow : Window
             await Task.Delay(350); // DWM이 창 숨김 후 화면을 갱신할 충분한 시간
 
             // GDI BitBlt 우선, DXGI 폴백으로 전체 화면 캡처
-            var rawResult = await _captureManager.CaptureFullScreenRawAsync();
+            CaptureResult rawResult;
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            {
+                try
+                {
+                    rawResult = await _captureManager.CaptureFullScreenRawAsync().WaitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    Show();
+                    StatusText.Text = "화면 캡처 시간 초과";
+                    return;
+                }
+            }
             var capturedScreen = rawResult.Image;
 
             if (capturedScreen == null || !rawResult.Success)
@@ -194,16 +224,24 @@ public partial class MainWindow : Window
 
                     if (cropWidth > 0 && cropHeight > 0)
                     {
-                        var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
-                        var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
-
-                        var result = new CaptureResult
+                        try
                         {
-                            Success = true,
-                            Image = croppedImage,
-                            EngineName = "RegionCapture"
-                        };
-                        HandleCaptureResult(result);
+                            var cropRect = new System.Drawing.Rectangle(cropX, cropY, cropWidth, cropHeight);
+                            var croppedImage = overlay.CapturedScreen.Clone(cropRect, overlay.CapturedScreen.PixelFormat);
+
+                            var result = new CaptureResult
+                            {
+                                Success = true,
+                                Image = croppedImage,
+                                EngineName = "RegionCapture"
+                            };
+                            HandleCaptureResult(result);
+                        }
+                        catch (Exception ex)
+                        {
+                            Services.Capture.CaptureLogger.Error("MainWindow", "영역 크롭 실패", ex);
+                            StatusText.Text = "영역 캡처 실패";
+                        }
                     }
                     overlay.CapturedScreen.Dispose();
                 }
@@ -225,7 +263,11 @@ public partial class MainWindow : Window
 
     private async Task CaptureDelayedAsync()
     {
-        if (_isCapturing) return;
+        if (_isCapturing)
+        {
+            StatusText.Text = "캡처 진행 중...";
+            return;
+        }
         _isCapturing = true;
 
         try
@@ -238,7 +280,16 @@ public partial class MainWindow : Window
                 await Task.Delay(1000);
             }
 
-            var result = await _captureManager.CaptureFullScreenAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            CaptureResult result;
+            try
+            {
+                result = await _captureManager.CaptureFullScreenAsync().WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                result = new CaptureResult { Success = false, ErrorMessage = "캡처 시간 초과 (10초)" };
+            }
             HandleCaptureResult(result);
 
             Show();
@@ -253,7 +304,11 @@ public partial class MainWindow : Window
 
     private async Task CaptureWindowAsync()
     {
-        if (_isCapturing) return;
+        if (_isCapturing)
+        {
+            StatusText.Text = "캡처 진행 중...";
+            return;
+        }
 
         // 창 선택 다이얼로그를 먼저 표시 (숨기기 전에)
         var dialog = new WindowPickerDialog(_windowCaptureService) { Owner = this };
@@ -268,7 +323,18 @@ public partial class MainWindow : Window
             Hide();
             await Task.Delay(150);
 
-            var result = await _captureManager.CaptureWindowAsync(selectedWindow.Handle);
+            CaptureResult result;
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            {
+                try
+                {
+                    result = await _captureManager.CaptureWindowAsync(selectedWindow.Handle).WaitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = new CaptureResult { Success = false, ErrorMessage = "캡처 시간 초과 (10초)" };
+                }
+            }
 
             Show();
             InvalidateVisual();

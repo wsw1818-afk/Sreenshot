@@ -79,8 +79,8 @@ public class CaptureOverlayForm : Form
     private string? _tempFilePath;
 
     private bool _showHelp = true;
-    private bool _inputEnabled;
-    private bool _closingByUser;
+    private volatile bool _inputEnabled;
+    private volatile bool _closingByUser;
     private System.Windows.Forms.Timer? _safetyTimer;
 
     // 그리기 리소스
@@ -128,8 +128,9 @@ public class CaptureOverlayForm : Form
         catch (Exception ex)
         {
             Services.Capture.CaptureLogger.Error("CaptureOverlayForm",
-                $"임시파일 로드 실패, 원본 비트맵 사용: {ex.Message}", ex);
-            _displayBitmap = capturedScreen;
+                $"임시파일 로드 실패, 원본 비트맵 복제 사용: {ex.Message}", ex);
+            // 원본 참조 대신 복제본 사용 → Dispose 시 원본(_capturedScreen) 보호
+            _displayBitmap = (Bitmap)capturedScreen.Clone();
         }
 
         // Form 설정
@@ -171,6 +172,16 @@ public class CaptureOverlayForm : Form
             {
                 e.Cancel = true;
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 (e.Cancel = true)");
+                // 차단 후 오버레이를 다시 최상위로 복구
+                BeginInvoke(() =>
+                {
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        SetWindowPos(Handle, HWND_TOPMOST, _screenX, _screenY, _screenWidth, _screenHeight, SWP_SHOWWINDOW);
+                        ForceSetForeground();
+                        Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "비사용자 닫기 차단 후 최상위 복구");
+                    }
+                });
             }
         };
 
@@ -179,6 +190,8 @@ public class CaptureOverlayForm : Form
         _safetyTimer.Tick += (s, e) =>
         {
             _safetyTimer?.Stop();
+            _safetyTimer?.Dispose();
+            _safetyTimer = null;
             if (!_closingByUser && !IsDisposed)
             {
                 Services.Capture.CaptureLogger.Warn("CaptureOverlayForm", "안전 타이머 만료 (30초) - 자동 취소");
@@ -452,18 +465,23 @@ public class CaptureOverlayForm : Form
             {
                 Services.Capture.CaptureLogger.Info("CaptureOverlayForm", "Low-level 키보드 훅: ESC 감지");
 
-                // UI 스레드에서 취소 실행
-                if (IsHandleCreated && !IsDisposed && !_closingByUser)
+                try
                 {
-                    BeginInvoke(() =>
+                    // UI 스레드에서 취소 실행
+                    if (IsHandleCreated && !IsDisposed && !_closingByUser)
                     {
-                        if (IsDisposed || _closingByUser) return;
-                        _closingByUser = true;
-                        DialogResult = DialogResult.Cancel;
-                        Close();
-                    });
-                    return (IntPtr)1; // ESC 키 소비 (다른 앱에 전달 안 함)
+                        BeginInvoke(() =>
+                        {
+                            if (IsDisposed || _closingByUser) return;
+                            _closingByUser = true;
+                            DialogResult = DialogResult.Cancel;
+                            Close();
+                        });
+                        return (IntPtr)1; // ESC 키 소비 (다른 앱에 전달 안 함)
+                    }
                 }
+                catch (ObjectDisposedException) { /* Form이 닫히는 중 - 무시 */ }
+                catch (InvalidOperationException) { /* 핸들 무효 - 무시 */ }
             }
         }
         return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);

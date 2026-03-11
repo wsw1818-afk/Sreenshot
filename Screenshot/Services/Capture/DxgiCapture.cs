@@ -22,7 +22,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     // IsAvailable 캐싱 - 세션 끊김 방지
     private bool? _cachedAvailability;
     private DateTime _lastAvailabilityCheck;
-    private static readonly TimeSpan AvailabilityCacheTime = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan AvailabilityCacheTime = TimeSpan.FromSeconds(5);
     private static readonly object AvailabilityLock = new();
 
     // 다중 모니터 논리↔물리 매핑 (CaptureVirtualScreen에서 설정, CaptureRegion에서 사용)
@@ -115,10 +115,10 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                 
                 CaptureLogger.Warn("DXGI", $"시도 {attempt}: 검은 화면, 재시도 중...");
                 result.Image.Dispose();
-                
+
                 // 리소스 완전 정리 후 재초기화
                 FullDispose();
-                Thread.Sleep(300 * attempt); // 점진적 대기
+                Thread.Sleep(100 * attempt); // 점진적 대기 (축소)
             }
             else if (result.Success)
             {
@@ -128,11 +128,11 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             {
                 // 오류 시 재시도
                 CaptureLogger.Warn("DXGI", $"시도 {attempt} 실패: {result.ErrorMessage}");
-                
+
                 if (attempt < 3)
                 {
                     FullDispose();
-                    Thread.Sleep(300 * attempt);
+                    Thread.Sleep(100 * attempt);
                 }
                 else
                 {
@@ -153,10 +153,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
     private void FullDispose()
     {
         Dispose();
-        // GC 강제 호출로 COM 객체 완전 정리
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+        // COM 객체는 Dispose()에서 정리됨 - GC.Collect 불필요 (성능 저하 원인)
     }
 
     private CaptureResult TryCaptureFullScreen(int attempt)
@@ -174,7 +171,7 @@ public class DxgiCapture : ICaptureEngine, IDisposable
             try { _duplication.ReleaseFrame(); } catch { }
 
             // 새 프레임 획득
-            Thread.Sleep(100); // 프레임 준비 시간
+            Thread.Sleep(50); // 프레임 준비 시간
             
             var result = _duplication.TryAcquireNextFrame(2000, out var frameInfo, out var desktopResource);
             
@@ -408,13 +405,13 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                             duplication = output1.DuplicateOutput(device);
 
                             try { duplication.ReleaseFrame(); } catch { }
-                            Thread.Sleep(150);
+                            Thread.Sleep(50);
 
-                            // 첫 프레임이 검은 화면일 수 있으므로 최대 3회 재시도
+                            // 첫 프레임이 검은 화면일 수 있으므로 최대 2회 재시도
                             Bitmap? capturedBmp = null;
-                            for (int retry = 0; retry < 3; retry++)
+                            for (int retry = 0; retry < 2; retry++)
                             {
-                                var frameResult = duplication.TryAcquireNextFrame(2000, out _, out var resource);
+                                var frameResult = duplication.TryAcquireNextFrame(1000, out _, out var resource);
                                 if (frameResult.Success)
                                 {
                                     try
@@ -435,12 +432,12 @@ public class DxgiCapture : ICaptureEngine, IDisposable
                                     {
                                         duplication.ReleaseFrame();
                                     }
-                                    Thread.Sleep(200 * (retry + 1));
+                                    Thread.Sleep(100);
                                 }
                                 else
                                 {
                                     CaptureLogger.Warn("DXGI", $"출력 [{ai}:{oi}] 시도 {retry + 1}: 프레임 획득 실패");
-                                    Thread.Sleep(200);
+                                    Thread.Sleep(100);
                                 }
                             }
 
